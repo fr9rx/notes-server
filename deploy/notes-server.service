@@ -1,0 +1,42 @@
+[Unit]
+Description=Course notes server
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=notes
+Group=notes
+EnvironmentFile=/etc/notes-server/env
+WorkingDirectory=/var/lib/notes-server
+ExecStart=/opt/notes-server/notes-server
+Restart=on-failure
+RestartSec=3
+# SIGTERM -> graceful shutdown drains requests for up to 30 s.
+TimeoutStopSec=40
+
+# Bind 443/80 without running as root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+# Hardening: read-only system, writable data dir only.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/notes-server
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+
+# Keep a misbehaving process from starving the Pi. Normal peak with
+# IMAGE_WORKERS=2 is well under this.
+MemoryMax=1G
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

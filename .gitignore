@@ -1,0 +1,7 @@
+/target
+/uploads
+/data
+/certs
+*.db
+*.db-shm
+*.db-wal

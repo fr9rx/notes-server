@@ -1,0 +1,5 @@
+# Files executed or parsed on the Pi must keep LF endings.
+*.sh text eol=lf
+*.service text eol=lf
+*.env.example text eol=lf
+*.sql text eol=lf

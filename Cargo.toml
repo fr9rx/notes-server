@@ -1,0 +1,43 @@
+[package]
+name = "notes-server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+axum = { version = "0.8.9", features = ["multipart"] }
+axum-server = { version = "0.8.0", features = ["tls-rustls-no-provider"] }
+fast_image_resize = "6.1.0"
+fs4 = "1.1.0"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
+jpeg-encoder = { version = "0.7.1", features = ["simd"] }
+ratatui = "0.30.2"
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "json", "multipart"] }
+rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "logging", "tls12"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite-bundled", "migrate", "macros"] }
+subtle = "2.6.1"
+thiserror = "2.0.21"
+tokio = { version = "1.53.1", features = ["full"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.7.1", features = ["fs", "trace", "cors", "limit", "set-header"] }
+tower_governor = { version = "0.8.0", default-features = false, features = ["axum"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+uuid = { version = "1.26.1", features = ["v7", "serde"] }
+
+[dev-dependencies]
+http-body-util = "0.1.5"
+rcgen = { version = "0.14.10", default-features = false, features = ["crypto", "pem", "ring"] }
+tempfile = "3.27.0"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# Image decoding/resizing is painfully slow unoptimised; keep dev builds usable.
+[profile.dev.package."*"]
+opt-level = 3
