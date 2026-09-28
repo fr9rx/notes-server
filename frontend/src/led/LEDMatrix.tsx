@@ -3,7 +3,6 @@ import { useReducedMotion } from "motion/react";
 import { useEffect, useRef } from "react";
 
 import { useTheme } from "../app/theme";
-import { liveNow, subscribeLive, useLive } from "../stats/store";
 import { sprites } from "./sprites";
 import {
   H,
@@ -12,7 +11,6 @@ import {
   W,
   drawArrow,
   drawCheck,
-  drawDashboard,
   drawMonogram,
   drawStarting,
   drawStopped,
@@ -50,8 +48,6 @@ const SIZES: Record<LEDSize, { dot: number; pitch: number; pad: number; radius: 
 };
 
 export interface LEDMatrixProps {
-  /** "stats" mirrors the board live; otherwise `pattern`/`text`. */
-  source?: "stats" | "pattern" | "text";
   pattern?: LEDPattern;
   /** Scrolls once (then `onTextDone`), or forever with `loopText`. Overrides the view while scrolling. */
   text?: string;
@@ -66,29 +62,15 @@ export interface LEDMatrixProps {
   pitch?: number;
   plate?: boolean;
   glow?: boolean;
-  /** Play the firmware "starting" comet first (hero boot moment). */
-  boot?: boolean;
   /** Changing this number plays a top-to-bottom scanline (card hover). */
   scan?: number;
   label?: string;
   screws?: boolean;
   silk?: string;
   className?: string;
-  /** Called with 0..1 average brightness each frame (hero bloom). */
-  onBrightness?: (b: number) => void;
 }
 
-/** Remembers once per session that the hero plate has "booted". */
-let bootedThisSession = (() => {
-  try {
-    return sessionStorage.getItem("led-booted") === "1";
-  } catch {
-    return false;
-  }
-})();
-
 export function LEDMatrix({
-  source = "pattern",
   pattern = "waiting",
   text,
   loopText,
@@ -100,13 +82,11 @@ export function LEDMatrix({
   pitch: pitchOverride,
   plate,
   glow: glowProp,
-  boot,
   scan,
   label,
   screws,
   silk,
   className,
-  onBrightness,
 }: LEDMatrixProps) {
   const { theme } = useTheme();
   const reduced = useReducedMotion() ?? false;
@@ -120,8 +100,8 @@ export function LEDMatrix({
   const height = H * pitch;
 
   // Everything the render loop reads lives in a ref, so props changes don't restart it.
-  const props = useRef({ source, pattern, text, loopText, onTextDone, monogram, seed, reduced, onBrightness });
-  props.current = { source, pattern, text, loopText, onTextDone, monogram, seed, reduced, onBrightness };
+  const props = useRef({ pattern, text, loopText, onTextDone, monogram, seed, reduced });
+  props.current = { pattern, text, loopText, onTextDone, monogram, seed, reduced };
 
   const textStart = useRef(0);
   useEffect(() => {
@@ -133,9 +113,7 @@ export function LEDMatrix({
     if (scan) scanStart.current = performance.now();
   }, [scan]);
 
-  // Screen-reader summary of the live board, refreshed at most every 10 s.
-  const live = useLive();
-  const aria = label ?? (source === "stats" ? ariaFor(live) : undefined);
+  const aria = label;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -153,22 +131,8 @@ export function LEDMatrix({
     canvas.style.margin = `-${margin}px`;
 
     const mountedAt = performance.now();
-    const doBoot = boot && !bootedThisSession && !props.current.reduced;
-    if (boot && !bootedThisSession) {
-      bootedThisSession = true;
-      try {
-        sessionStorage.setItem("led-booted", "1");
-      } catch {
-        // ignore
-      }
-    }
-
     const shown = new Float32Array(W * H); // phosphor persistence
     let lastFrameAt = mountedAt;
-    let lastTick = liveNow().tick;
-    let shiftAt = -Infinity;
-    let arrowAt = -Infinity;
-    let lastLocalUpload = liveNow().localUploadAt;
     let textDoneFired = false;
     let raf = 0;
     let visible = true;
@@ -196,46 +160,6 @@ export function LEDMatrix({
         }
       } else {
         textDoneFired = false;
-      }
-
-      if (doBoot && t < 840) {
-        drawStarting(f, t);
-        return { frame: f, still: false };
-      }
-
-      if (p.source === "stats") {
-        const snap = liveNow();
-        if (snap.tick !== lastTick) {
-          lastTick = snap.tick;
-          shiftAt = now;
-          if ((snap.stats?.uploads[12] ?? 0) > 0) arrowAt = now;
-        }
-        if (snap.localUploadAt !== lastLocalUpload) {
-          lastLocalUpload = snap.localUploadAt;
-          arrowAt = now;
-        }
-        const inArrow = now - arrowAt < UPLOAD_ANIM_MS;
-        if (snap.state === "down") {
-          if (Math.floor(now / 500) % 2 === 0) drawX(f);
-        } else if (snap.state === "error") {
-          drawX(f);
-        } else if (snap.state === "waiting" || !snap.stats) {
-          drawWaiting(f, t);
-        } else if (inArrow && !p.reduced) {
-          drawArrow(f, now - arrowAt);
-        } else if (inArrow && p.reduced) {
-          f.fill(5); // reduced motion: a brief flash instead of the flight
-        } else {
-          drawDashboard(f, {
-            requests: snap.stats.requests,
-            uploads: snap.stats.uploads,
-            warning: snap.state === "warning",
-            now,
-            sinceStatus: now - snap.tickAt,
-            newestMaxHeight: p.reduced ? undefined : Math.floor((now - shiftAt) / 35),
-          });
-        }
-        return { frame: f, still: false };
       }
 
       switch (p.pattern) {
@@ -322,7 +246,6 @@ export function LEDMatrix({
           if (sprite) g.drawImage(sprite, off + x * pitch * dpr, off + y * pitch * dpr);
         }
       }
-      props.current.onBrightness?.(sum / (W * H * MAX));
       return still && !settling;
     };
 
@@ -345,7 +268,6 @@ export function LEDMatrix({
     });
     io.observe(canvas);
     document.addEventListener("visibilitychange", kick);
-    const unsub = source === "stats" ? subscribeLive(kick) : undefined;
     kick();
     // Props like `pattern`/`text`/`scan` change through the ref; poll for a restart cheaply.
     const wake = window.setInterval(kick, 250);
@@ -355,9 +277,8 @@ export function LEDMatrix({
       io.disconnect();
       document.removeEventListener("visibilitychange", kick);
       window.clearInterval(wake);
-      unsub?.();
     };
-  }, [dot, pitch, glow, width, height, size, source, boot]);
+  }, [dot, pitch, glow, width, height, size]);
 
   const canvas = (
     <canvas
@@ -413,19 +334,3 @@ function Screws() {
   );
 }
 
-let lastAria = "";
-let lastAriaAt = 0;
-function ariaFor(live: ReturnType<typeof liveNow>): string {
-  const now = Date.now();
-  if (lastAria && now - lastAriaAt < 10_000) return lastAria;
-  const s = live.stats;
-  const text =
-    live.state === "down"
-      ? "Server status: the board is not answering."
-      : live.state === "waiting" || !s
-        ? "Server status: connecting to the board."
-        : `Server status: ${s.status}. ${s.requests[12] ?? 0} requests per second, ${s.uploads.reduce((a, b) => a + b, 0)} photos uploaded in the last 13 seconds.`;
-  lastAria = text;
-  lastAriaAt = now;
-  return text;
-}

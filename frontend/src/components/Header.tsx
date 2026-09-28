@@ -1,15 +1,11 @@
 import clsx from "clsx";
 import { AnimatePresence, m, useMotionValueEvent, useReducedMotion, useScroll, useTransform } from "motion/react";
-import { ChevronLeft, ChevronRight, House, Upload } from "lucide-react";
+import { ChevronLeft, ChevronRight, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, matchPath, useLocation, useNavigate } from "react-router";
 
-import { LEDMatrix } from "../led/LEDMatrix";
-import { formatUptime } from "../lib/format";
 import { useCourse } from "../lib/queries";
 import { dur, spring } from "../motion/springs";
-import { useLive } from "../stats/store";
-import { StatusDot } from "./Badge";
 import { ThemeToggle } from "./ThemeToggle";
 
 interface Crumb {
@@ -131,7 +127,6 @@ export function Header() {
         </nav>
 
         <div className="ml-auto flex items-center gap-1.5">
-          <LivePill />
           <AnimatePresence>
             {onChapter && scrolled && chapterPath && (
               <m.button
@@ -158,113 +153,36 @@ export function Header() {
 }
 
 function Wordmark({ className }: { className?: string }) {
-  const [hi, setHi] = useState<string | undefined>();
   return (
-    <Link
-      to="/"
-      aria-label="notes — home"
-      onPointerEnter={() => setHi("HI")}
-      className={clsx("flex shrink-0 items-center gap-2.5 rounded-[10px] py-1 pr-1", className)}
-    >
-      <span className="rounded-[6px] bg-plate p-[5px] shadow-[inset_0_0_0_1px_var(--plate-bezel)]">
-        <LEDMatrix source="stats" size="micro" plate={false} text={hi} onTextDone={() => setHi(undefined)} label="" />
-      </span>
+    <Link to="/" aria-label="notes — home" className={clsx("group flex shrink-0 items-center gap-2.5 rounded-[10px] py-1 pr-1", className)}>
+      <LogoMark size={32} />
       <span className="font-display text-[20px] font-[680] tracking-[-0.02em] text-fg-1">notes</span>
     </Link>
   );
 }
 
-function LivePill() {
-  const live = useLive();
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const now = live.stats?.requests[12] ?? 0;
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: PointerEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("pointerdown", close);
-    document.addEventListener("keydown", esc);
-    return () => {
-      document.removeEventListener("pointerdown", close);
-      document.removeEventListener("keydown", esc);
-    };
-  }, [open]);
-
+/** The brand mark: a small dot grid with a rising bar graph (static artwork). */
+export function LogoMark({ size = 32 }: { size?: number }) {
+  const lit = new Set(["2,1", "1,2", "2,2", "3,2", "0,3", "1,3", "2,3", "3,3", "4,3"]);
   return (
-    <div ref={ref} className="relative hidden md:block">
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        onClick={() => setOpen((o) => !o)}
-        className="flex h-9 items-center gap-2 rounded-full border border-line-subtle px-3 text-fg-2 transition-colors hover:border-line hover:bg-surface-3/60 hover:text-fg-1"
-      >
-        <span className="rounded-[5px] bg-plate px-[4px] py-[3px] leading-none">
-          <LEDMatrix source="stats" size="micro" plate={false} label="" />
-        </span>
-        <span className="t-meta tabular-nums">{live.state === "down" ? "offline" : `${now}/s`}</span>
-      </button>
-      <AnimatePresence>{open && <StatsPopover />}</AnimatePresence>
-    </div>
+    <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden className="shrink-0">
+      <rect width="32" height="32" rx="8" fill="var(--plate)" />
+      {Array.from({ length: 4 }, (_, row) =>
+        Array.from({ length: 5 }, (_, col) => {
+          const on = lit.has(`${col},${row}`);
+          return (
+            <circle
+              key={`${col},${row}`}
+              cx={7 + col * 4.5}
+              cy={9 + row * 4.7}
+              r={on ? 1.7 : 1.4}
+              fill={on ? "#4C9AFF" : "#16305F"}
+              className={on ? "transition-[fill] duration-300 group-hover:fill-[#8CBEFF]" : undefined}
+            />
+          );
+        }),
+      )}
+      <circle cx="25" cy="9" r="1.9" fill="#DCEBFF" />
+    </svg>
   );
 }
-
-const STATUS_TEXT = {
-  waiting: "Connecting to the board…",
-  ok: "All systems normal",
-  warning: "Storage almost full — uploads paused",
-  error: "Database not responding",
-  down: "Board unreachable",
-} as const;
-
-export function statusTone(state: keyof typeof STATUS_TEXT) {
-  return state === "ok" ? "ok" : state === "warning" ? "warn" : state === "waiting" ? "off" : "err";
-}
-
-function StatsPopover() {
-  const live = useLive();
-  const s = live.stats;
-  const req = s?.requests ?? [];
-  const peak = req.length ? Math.max(...req) : 0;
-  const uploads = s?.uploads.reduce((a, b) => a + b, 0) ?? 0;
-  return (
-    <m.div
-      role="dialog"
-      aria-label="Live from the board"
-      initial={{ opacity: 0, scale: 0.96, y: -4 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.96, y: -4, transition: { duration: dur.fast } }}
-      transition={spring.snappy}
-      style={{ transformOrigin: "top right" }}
-      className="absolute right-0 top-[calc(100%+8px)] z-50 w-[300px] rounded-[20px] border border-line bg-surface-2 p-4 shadow-[var(--shadow-3)]"
-    >
-      <p className="t-caption text-fg-3">Live from the board</p>
-      <div className="mt-3 flex justify-center">
-        <LEDMatrix source="stats" size="sm" />
-      </div>
-      <dl className="t-meta mt-4 grid grid-cols-2 gap-x-4 gap-y-1.5 text-fg-2">
-        <dt className="text-fg-3">requests now</dt>
-        <dd className="text-right text-fg-1">{req[12] ?? 0}/s</dd>
-        <dt className="text-fg-3">peak (13 s)</dt>
-        <dd className="text-right text-fg-1">{peak}/s</dd>
-        <dt className="text-fg-3">uploads (13 s)</dt>
-        <dd className="text-right text-fg-1">{uploads} photos</dd>
-        <dt className="text-fg-3">uptime</dt>
-        <dd className="text-right text-fg-1">{s ? formatUptime(s.uptime_secs) : "—"}</dd>
-      </dl>
-      <p className="t-body-s mt-3 flex items-center gap-2 text-fg-2">
-        <StatusDot tone={statusTone(live.state)} pulse={live.state === "ok" && live.tick % 2 === 0} />
-        {STATUS_TEXT[live.state]}
-      </p>
-      <p className="t-body-s mt-3 border-t border-line-subtle pt-3 text-fg-3">
-        Each column is one second. Height is requests (log scale). Bright tops are uploads.
-      </p>
-    </m.div>
-  );
-}
-
-export { STATUS_TEXT };
-export const HomeIcon = House;

@@ -2,7 +2,6 @@ import { useReducedMotion } from "motion/react";
 import { useEffect, useRef, type RefObject } from "react";
 
 import { useTheme } from "../app/theme";
-import { liveNow, subscribeLive } from "../stats/store";
 import { inkSprites, sprites } from "./sprites";
 
 interface Ripple {
@@ -12,10 +11,6 @@ interface Ripple {
   strength: number;
   born: number;
 }
-interface Column {
-  col: number;
-  born: number;
-}
 
 const smoothstep = (a: number, b: number, v: number) => {
   const t = Math.min(1, Math.max(0, (v - a) / (b - a)));
@@ -23,19 +18,15 @@ const smoothstep = (a: number, b: number, v: number) => {
 };
 
 /**
- * The hero background (DESIGN.md §4.9): a huge, dim LED panel. Clouds of
- * light drift across it, a spotlight follows the pointer, and every real
- * request to the board sends a ripple out of the LED plate.
+ * The hero background: a huge, dim LED panel. Clouds of light drift across
+ * it, a spotlight follows the pointer, and a tap or click sends a ripple out.
  */
 export function LEDField({
   hostRef,
-  originRef,
   avoidRef,
 }: {
   /** The hero section (pointer events are read from it). */
   hostRef: RefObject<HTMLElement | null>;
-  /** Ripples start at this element's centre (the LED plate). */
-  originRef: RefObject<HTMLElement | null>;
   /** Dots dim inside this box so the headline stays readable. */
   avoidRef: RefObject<HTMLElement | null>;
 }) {
@@ -61,13 +52,10 @@ export function LEDField({
     let set = theme === "dark" ? sprites(4.4, dpr, true) : inkSprites(4.4, dpr);
     let lowPower = false;
     const ripples: Ripple[] = [];
-    const columns: Column[] = [];
     const pointer = { x: -9999, y: -9999, tx: -9999, ty: -9999, presence: 0, target: 0 };
-    let origin = { x: 0, y: 0 };
     let avoid = { x0: 0, y0: 0, x1: 0, y1: 0 };
     let raf = 0;
     let visible = true;
-    let lastTick = liveNow().tick;
     let frameTimes: number[] = [];
     let skip = false;
 
@@ -82,8 +70,6 @@ export function LEDField({
       canvas.height = Math.round(H * dpr);
       canvas.style.width = `${W}px`;
       canvas.style.height = `${H}px`;
-      const o = originRef.current?.getBoundingClientRect();
-      if (o) origin = { x: o.left - rect.left + o.width / 2, y: o.top - rect.top + o.height / 2 };
       const a = avoidRef.current?.getBoundingClientRect();
       if (a) avoid = { x0: a.left - rect.left - 24, y0: a.top - rect.top - 24, x1: a.right - rect.left + 24, y1: a.bottom - rect.top + 24 };
     };
@@ -102,10 +88,6 @@ export function LEDField({
       for (let i = ripples.length - 1; i >= 0; i--) {
         const r = ripples[i];
         if (r && (r.r > Math.hypot(W, H) || r.strength < 0.02)) ripples.splice(i, 1);
-      }
-      for (let i = columns.length - 1; i >= 0; i--) {
-        const c = columns[i];
-        if (c && nowMs - c.born > 1400) columns.splice(i, 1);
       }
 
       const spriteSize = set.size;
@@ -127,13 +109,6 @@ export function LEDField({
           for (const r of ripples) {
             const band = 1 - Math.abs(Math.hypot(x - r.x, y - r.y) - r.r) / 48;
             if (band > 0) v += band * r.strength;
-          }
-          for (const c of columns) {
-            if (Math.abs(i - c.col) <= 1) {
-              const front = H - ((nowMs - c.born) / 900) * H;
-              const d = y - front;
-              if (d > 0 && d < 160) v += (1 - d / 160) * 0.9;
-            }
           }
           const edge = smoothstep(0, 60, x) * smoothstep(0, 60, W - x);
           v *= yFade * edge;
@@ -208,20 +183,14 @@ export function LEDField({
     };
     document.addEventListener("visibilitychange", onVisible);
 
-    const unsub = subscribeLive(() => {
-      const snap = liveNow();
-      if (snap.tick === lastTick || reduced) return;
-      lastTick = snap.tick;
-      measure();
-      const n = snap.stats?.requests[12] ?? 0;
-      const count = Math.min(3, Math.ceil(Math.log2(n + 1)));
-      for (let k = 0; k < count && ripples.length < 6; k++) {
-        ripples.push({ x: origin.x, y: origin.y, r: 0, strength: 0.6, born: performance.now() + k * 120 });
-      }
-      if ((snap.stats?.uploads[12] ?? 0) > 0) {
-        columns.push({ col: Math.floor(Math.random() * cols), born: performance.now() });
-      }
-    });
+    // A tap or click sends a ripple through the field.
+    const onDown = (e: PointerEvent) => {
+      if (reduced) return;
+      const rect = host.getBoundingClientRect();
+      if (ripples.length >= 6) ripples.shift();
+      ripples.push({ x: e.clientX - rect.left, y: e.clientY - rect.top, r: 0, strength: 0.7, born: performance.now() });
+    };
+    host.addEventListener("pointerdown", onDown);
 
     return () => {
       cancelAnimationFrame(raf);
@@ -230,9 +199,9 @@ export function LEDField({
       host.removeEventListener("pointermove", onMove);
       host.removeEventListener("pointerleave", onLeave);
       document.removeEventListener("visibilitychange", onVisible);
-      unsub();
+      host.removeEventListener("pointerdown", onDown);
     };
-  }, [hostRef, originRef, avoidRef, theme, reduced]);
+  }, [hostRef, avoidRef, theme, reduced]);
 
   return <canvas ref={canvasRef} aria-hidden className="pointer-events-none absolute inset-0" />;
 }

@@ -31,8 +31,8 @@ The site is a React app in `frontend/`. It's compiled into the server binary, so
 
 The design spec is `frontend/DESIGN.md` ("Phosphor & Paper"). The site grows out of the board's blue 8×13 LED matrix:
 - **Home:**
-  - a canvas LED field whose clouds drift and follow the cursor, with a ripple from the plate on every real request;
-  - a live replica of the board's matrix, driven by `GET /api/stats` using the same drawing code as the firmware;
+  - a canvas LED field whose clouds drift and follow the cursor, and ripple where you tap;
+  - a fanned stack of the newest course photos that spreads on hover;
   - a word-by-word headline reveal;
   - counters with rolling digits;
   - course cards with an LED-halftone cover that reveals the real photo on hover, 3D tilt, a spotlight border and an LED monogram.

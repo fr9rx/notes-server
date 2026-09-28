@@ -19,7 +19,6 @@ import { formatBytes } from "../lib/format";
 import { useCourse } from "../lib/queries";
 import type { Note } from "../lib/types";
 import { dur, ease, spring } from "../motion/springs";
-import { notifyLocalUpload } from "../stats/store";
 import { burst } from "../upload/celebrate";
 import { markJustPosted, takePendingFiles } from "../upload/pending";
 
@@ -236,6 +235,7 @@ export default function UploadSheet({ slug, chapterId }: { slug: string; chapter
     void queryClient.invalidateQueries({ queryKey: ["chapter", chapterId] });
     void queryClient.invalidateQueries({ queryKey: ["course", slug] });
     void queryClient.invalidateQueries({ queryKey: ["courses"] });
+    void queryClient.invalidateQueries({ queryKey: ["totals"] });
     markJustPosted(note.id);
     try {
       if (author.trim()) localStorage.setItem("notes.author", author.trim());
@@ -333,7 +333,6 @@ export default function UploadSheet({ slug, chapterId }: { slug: string; chapter
     }
     setPhase("uploading");
     setProgress(0);
-    notifyLocalUpload();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     try {

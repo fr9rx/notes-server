@@ -1,4 +1,3 @@
-import clsx from "clsx";
 import { AnimatePresence, m, useMotionValue, useReducedMotion, useScroll, useSpring, useTransform } from "motion/react";
 import { ArrowDown, ArrowUpRight } from "lucide-react";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
@@ -13,11 +12,10 @@ import { StatePanel } from "../components/StatePanel";
 import { LEDField } from "../led/LEDField";
 import { LEDMatrix } from "../led/LEDMatrix";
 import { monogramText } from "../led/views";
-import { formatUptime, plural } from "../lib/format";
-import { useCourses } from "../lib/queries";
+import { plural } from "../lib/format";
+import { useCourses, useTotals } from "../lib/queries";
 import type { CourseSummary } from "../lib/types";
 import { dur, ease, gridDelay, spring } from "../motion/springs";
-import { useLive } from "../stats/store";
 
 export default function Home() {
   useEffect(() => {
@@ -38,41 +36,19 @@ const HEADLINE = [["Every", "note"], ["from", "class,"], ["in", "one", "place."]
 
 function Hero() {
   const hostRef = useRef<HTMLElement>(null);
-  const plateRef = useRef<HTMLDivElement>(null);
   const copyRef = useRef<HTMLDivElement>(null);
   const reduced = useReducedMotion();
-  const live = useLive();
   const { scrollY } = useScroll();
   const copyY = useTransform(scrollY, [0, 360], [0, -48]);
   const copyOpacity = useTransform(scrollY, [0, 360], [1, 0]);
-  const plateY = useTransform(scrollY, [0, 480], [0, -80]);
-  const plateScale = useTransform(scrollY, [0, 480], [1, 0.9]);
-  const plateRotateX = useTransform(scrollY, [0, 480], [0, 14]);
+  const stackY = useTransform(scrollY, [0, 480], [0, -80]);
+  const stackRotateX = useTransform(scrollY, [0, 480], [0, 12]);
   const fieldOpacity = useTransform(scrollY, [0, 600], [1, 0.25]);
-  const bloom = useSpring(0.2, { stiffness: 60, damping: 20 });
-
-  // Plate tilts toward the cursor (fine pointers).
-  const tiltX = useSpring(0, spring.tilt);
-  const tiltY = useSpring(0, spring.tilt);
-  const onMove = (e: ReactPointerEvent) => {
-    if (reduced || e.pointerType !== "mouse") return;
-    const r = plateRef.current?.getBoundingClientRect();
-    if (!r) return;
-    tiltY.set(((e.clientX - (r.left + r.width / 2)) / window.innerWidth) * 12);
-    tiltX.set(-((e.clientY - (r.top + r.height / 2)) / window.innerHeight) * 12);
-  };
-
-  const s = live.stats;
   const [how, setHow] = useState(false);
 
   return (
     <section
       ref={hostRef}
-      onPointerMove={onMove}
-      onPointerLeave={() => {
-        tiltX.set(0);
-        tiltY.set(0);
-      }}
       className="relative isolate overflow-hidden pb-16 pt-[152px] md:pb-24 md:pt-[208px]"
       style={{ minHeight: "min(88vh, 860px)" }}
     >
@@ -83,7 +59,7 @@ function Hero() {
         animate={{ opacity: 1 }}
         transition={{ duration: 0.6, ease: ease.outExpo }}
       >
-        <LEDField hostRef={hostRef} originRef={plateRef} avoidRef={copyRef} />
+        <LEDField hostRef={hostRef} avoidRef={copyRef} />
       </m.div>
 
       <div className="mx-auto grid max-w-[1240px] items-center gap-12 px-4 sm:px-6 lg:grid-cols-12 lg:px-8">
@@ -94,8 +70,8 @@ function Hero() {
             transition={{ delay: 0.1, duration: dur.base }}
             className="t-caption flex items-center gap-2 text-accent"
           >
-            <HeartbeatDot tick={live.tick} down={live.state === "down"} />
-            Live on the LAN
+            <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-accent" style={{ boxShadow: "0 0 10px var(--accent)" }} />
+            Class notes, shared
           </m.p>
           <h1 className="t-display-xl mt-5 text-fg-1">
             {HEADLINE.map((line, li) => (
@@ -129,8 +105,8 @@ function Hero() {
             transition={{ ...spring.soft, delay: 0.52 }}
             className="t-body-l mt-6 max-w-[34rem] text-fg-2"
           >
-            Photos of whiteboards, scans and handwritten pages — shared by students, served from a tiny board on your
-            network. No accounts, no cloud.
+            Photos of whiteboards, scans and handwritten pages — shared by students, right on your network. No
+            accounts, no cloud.
           </m.p>
           <m.div
             initial={{ opacity: 0, y: 10 }}
@@ -173,71 +149,82 @@ function Hero() {
         </m.div>
 
         <m.div
-          style={reduced ? undefined : { y: plateY, scale: plateScale, rotateX: plateRotateX, transformPerspective: 1000 }}
-          className="flex flex-col items-center lg:col-span-5"
+          style={reduced ? undefined : { y: stackY, rotateX: stackRotateX, transformPerspective: 1000 }}
+          className="lg:col-span-5"
         >
-          <m.div
-            ref={plateRef}
-            initial={reduced ? { opacity: 0 } : { opacity: 0, y: 24, rotateX: 18 }}
-            animate={{ opacity: 1, y: 0, rotateX: 0 }}
-            transition={{ ...spring.soft, delay: 0.3 }}
-            style={{ rotateX: tiltX, rotateY: tiltY, transformPerspective: 900 }}
-            className="relative w-full max-w-[340px] lg:max-w-none"
-          >
-            <div className="flex justify-center">
-              <div className="relative origin-top scale-[0.86] xs:scale-100">
-                {/* The plate "lights the room" when the board is busy. */}
-                <m.div
-                  aria-hidden
-                  className="pointer-events-none absolute inset-6 -z-10 rounded-[28px]"
-                  style={{ opacity: bloom, boxShadow: "var(--glow-lg)" }}
-                />
-                <LEDMatrix
-                  source="stats"
-                  size="hero"
-                  boot
-                  silk="UNO Q · LED 8×13"
-                  onBrightness={(b) => bloom.set(0.2 + b * 4)}
-                />
-              </div>
-            </div>
-          </m.div>
-          <p className="t-caption mt-4 text-fg-3">
-            UNO Q · 8×13 · {s?.requests[12] ?? 0} req/s{s ? ` · up ${formatUptime(s.uptime_secs)}` : ""}
-          </p>
+          <PhotoStack />
         </m.div>
       </div>
     </section>
   );
 }
 
-function HeartbeatDot({ tick, down }: { tick: number; down: boolean }) {
+/** The newest course covers, fanned like prints on a desk; they spread on hover. */
+function PhotoStack() {
+  const { data } = useCourses();
+  const reduced = useReducedMotion();
+  const [spread, setSpread] = useState(false);
+  const covers = (data ?? [])
+    .filter((c) => c.cover_thumb_url)
+    .slice(0, 3)
+    .map((c) => ({ slug: c.slug, name: c.name, src: c.cover_thumb_url as string }));
+  if (covers.length === 0) return null;
+
+  const layout = [
+    { rotate: -9, x: -70, y: 18, spreadX: -150, spreadRotate: -14 },
+    { rotate: 6, x: 64, y: -6, spreadX: 150, spreadRotate: 12 },
+    { rotate: -1.5, x: 0, y: 0, spreadX: 0, spreadRotate: -2 },
+  ].slice(3 - covers.length);
+
   return (
-    <span className="relative inline-flex h-2 w-2" aria-hidden>
-      <m.span
-        key={tick}
-        className="absolute inset-0 rounded-full bg-accent"
-        initial={{ scale: 1, opacity: 0.7 }}
-        animate={{ scale: 3.2, opacity: 0 }}
-        transition={{ duration: 0.9, ease: ease.outExpo }}
-      />
-      <span
-        className={clsx("relative h-2 w-2 rounded-full", down ? "bg-err" : "bg-accent")}
-        style={{ boxShadow: "0 0 10px var(--accent)" }}
-      />
-    </span>
+    <div
+      className="relative mx-auto hidden h-[340px] w-full max-w-[460px] sm:block"
+      onPointerEnter={() => setSpread(true)}
+      onPointerLeave={() => setSpread(false)}
+    >
+      {covers.map((c, i) => {
+        const l = layout[i] ?? layout[0]!;
+        return (
+          <m.div
+            key={c.slug}
+            className="absolute left-1/2 top-1/2 w-[62%] -translate-x-1/2 -translate-y-1/2"
+            initial={reduced ? { opacity: 0 } : { opacity: 0, y: 60, rotate: 0, scale: 0.9 }}
+            animate={{
+              opacity: 1,
+              x: spread && !reduced ? l.spreadX : l.x,
+              y: l.y,
+              rotate: spread && !reduced ? l.spreadRotate : l.rotate,
+              scale: 1,
+            }}
+            transition={{ ...spring.soft, delay: 0.35 + i * 0.12 }}
+            style={{ zIndex: i }}
+          >
+            <Link
+              to={`/c/${c.slug}`}
+              aria-label={c.name}
+              className="block overflow-hidden rounded-[18px] border border-line bg-surface-1 p-1.5 shadow-[var(--shadow-3)]"
+            >
+              <div className="aspect-[4/3] overflow-hidden rounded-[13px] bg-surface-3">
+                <img src={c.src} alt="" className="h-full w-full object-cover" draggable={false} />
+              </div>
+              <p className="t-caption truncate px-1.5 pb-1 pt-2 text-fg-3">{c.name}</p>
+            </Link>
+          </m.div>
+        );
+      })}
+    </div>
   );
 }
 
 // ---- Stats ---------------------------------------------------------------------------
 
 function StatsRow() {
-  const { stats } = useLive();
+  const { data } = useTotals();
   const items = [
-    ["Courses", stats?.courses],
-    ["Chapters", stats?.chapters],
-    ["Notes", stats?.notes],
-    ["Photos", stats?.images],
+    ["Courses", data?.courses],
+    ["Chapters", data?.chapters],
+    ["Notes", data?.notes],
+    ["Photos", data?.images],
   ] as const;
   return (
     <PageItem as="section" i={2} className="mx-auto max-w-[1240px] px-4 sm:px-6 lg:px-8">

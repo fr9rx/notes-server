@@ -21,6 +21,17 @@ export function useCourses() {
   });
 }
 
+/** Content totals for the home counters (fetched once, refreshed on focus). */
+export function useTotals() {
+  return useQuery({
+    queryKey: ["totals"],
+    queryFn: ({ signal }) => api.stats(signal),
+    staleTime: 30_000,
+    retry,
+    retryDelay,
+  });
+}
+
 export function useCourse(slug: string, enabled = true) {
   return useQuery({
     queryKey: ["course", slug],
