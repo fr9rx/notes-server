@@ -31,7 +31,8 @@ pub async fn create(
     Ok((StatusCode::CREATED, Json(chapter)))
 }
 
-/// The chapter with one page of its notes (oldest first) and their images.
+/// The chapter with one page of its notes (oldest first, or newest first with
+/// `?order=desc`) and their images.
 pub async fn get(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -45,9 +46,14 @@ pub async fn get(
     let chapter = db::chapter_by_id(&mut *tx, &id)
         .await?
         .ok_or(AppError::NotFound("chapter"))?;
+    let newest_first = match page.order.as_deref() {
+        None | Some("asc") => false,
+        Some("desc") => true,
+        Some(_) => return Err(AppError::BadRequest("`order` must be asc or desc".into())),
+    };
     let total_notes = db::count_notes(&mut *tx, &id).await?;
-    let notes = db::notes_page(&mut *tx, &id, limit, offset).await?;
-    let images = db::images_for_notes_page(&mut *tx, &id, limit, offset).await?;
+    let notes = db::notes_page(&mut *tx, &id, limit, offset, newest_first).await?;
+    let images = db::images_for_notes_page(&mut *tx, &id, limit, offset, newest_first).await?;
     tx.commit().await?;
 
     let mut by_note: HashMap<String, Vec<ImageRow>> = HashMap::new();

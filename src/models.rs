@@ -106,11 +106,90 @@ impl NoteDto {
     }
 }
 
+/// Course listing row: the course plus counts and the newest image as a cover.
+#[derive(Debug, Clone, FromRow)]
+pub struct CourseSummaryRow {
+    #[sqlx(flatten)]
+    pub course: Course,
+    pub chapter_count: i64,
+    pub note_count: i64,
+    pub image_count: i64,
+    pub cover_thumb_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CourseSummary {
+    #[serde(flatten)]
+    pub course: Course,
+    pub chapter_count: i64,
+    pub note_count: i64,
+    pub image_count: i64,
+    pub cover_thumb_url: Option<String>,
+}
+
+impl CourseSummary {
+    pub fn new(row: CourseSummaryRow, storage: &LocalStorage) -> Self {
+        Self {
+            cover_thumb_url: row.cover_thumb_key.map(|k| storage.url_for(&k)),
+            course: row.course,
+            chapter_count: row.chapter_count,
+            note_count: row.note_count,
+            image_count: row.image_count,
+        }
+    }
+}
+
+/// Chapter listing row: the chapter plus counts and the newest image as a cover.
+#[derive(Debug, Clone, FromRow)]
+pub struct ChapterSummaryRow {
+    #[sqlx(flatten)]
+    pub chapter: Chapter,
+    pub note_count: i64,
+    pub image_count: i64,
+    pub cover_thumb_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChapterSummary {
+    #[serde(flatten)]
+    pub chapter: Chapter,
+    pub note_count: i64,
+    pub image_count: i64,
+    pub cover_thumb_url: Option<String>,
+}
+
+impl ChapterSummary {
+    pub fn new(row: ChapterSummaryRow, storage: &LocalStorage) -> Self {
+        Self {
+            cover_thumb_url: row.cover_thumb_key.map(|k| storage.url_for(&k)),
+            chapter: row.chapter,
+            note_count: row.note_count,
+            image_count: row.image_count,
+        }
+    }
+}
+
+/// `GET /api/stats`: totals plus the live numbers the LED matrix shows.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Stats {
+    pub courses: i64,
+    pub chapters: i64,
+    pub notes: i64,
+    pub images: i64,
+    pub uptime_secs: u64,
+    /// "starting" | "ok" | "warning" | "error"
+    pub status: String,
+    /// Requests per second over the last 13 seconds, oldest first.
+    pub requests: Vec<u64>,
+    /// Uploaded images per second over the last 13 seconds, oldest first.
+    pub uploads: Vec<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CourseDetail {
     #[serde(flatten)]
     pub course: Course,
-    pub chapters: Vec<Chapter>,
+    pub chapters: Vec<ChapterSummary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -171,4 +250,6 @@ pub struct UpdateNote {
 pub struct Page {
     pub limit: Option<i64>,
     pub offset: Option<i64>,
+    /// "asc" (default, oldest first) or "desc" (newest first).
+    pub order: Option<String>,
 }

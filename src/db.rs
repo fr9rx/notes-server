@@ -7,7 +7,10 @@ use std::time::Duration;
 use sqlx::SqliteExecutor;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous};
 
-use crate::models::{Chapter, Course, ImageRow, Note, UpdateChapter, UpdateCourse, UpdateNote};
+use crate::models::{
+    Chapter, ChapterSummaryRow, Course, CourseSummaryRow, ImageRow, Note, UpdateChapter, UpdateCourse,
+    UpdateNote,
+};
 
 pub async fn connect(url: &str) -> Result<SqlitePool, sqlx::Error> {
     let options = SqliteConnectOptions::from_str(url)?
@@ -35,10 +38,21 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::migrate::MigrateErro
 
 // ---- Courses ---------------------------------------------------------------
 
-pub async fn list_courses(e: impl SqliteExecutor<'_>) -> sqlx::Result<Vec<Course>> {
-    sqlx::query_as("SELECT * FROM courses ORDER BY name COLLATE NOCASE, id")
-        .fetch_all(e)
-        .await
+pub async fn list_courses(e: impl SqliteExecutor<'_>) -> sqlx::Result<Vec<CourseSummaryRow>> {
+    sqlx::query_as(
+        "SELECT c.*,
+            (SELECT COUNT(*) FROM chapters ch WHERE ch.course_id = c.id) AS chapter_count,
+            (SELECT COUNT(*) FROM notes n JOIN chapters ch ON ch.id = n.chapter_id
+              WHERE ch.course_id = c.id) AS note_count,
+            (SELECT COUNT(*) FROM images i JOIN notes n ON n.id = i.note_id
+              JOIN chapters ch ON ch.id = n.chapter_id WHERE ch.course_id = c.id) AS image_count,
+            (SELECT i.thumb_key FROM images i JOIN notes n ON n.id = i.note_id
+              JOIN chapters ch ON ch.id = n.chapter_id WHERE ch.course_id = c.id
+              ORDER BY n.created_at DESC, n.id DESC, i.position LIMIT 1) AS cover_thumb_key
+         FROM courses c ORDER BY c.name COLLATE NOCASE, c.id",
+    )
+    .fetch_all(e)
+    .await
 }
 
 pub async fn course_by_slug(e: impl SqliteExecutor<'_>, slug: &str) -> sqlx::Result<Option<Course>> {
@@ -106,11 +120,33 @@ pub async fn delete_course(e: impl SqliteExecutor<'_>, id: &str) -> sqlx::Result
 
 // ---- Chapters --------------------------------------------------------------
 
-pub async fn chapters_for_course(e: impl SqliteExecutor<'_>, course_id: &str) -> sqlx::Result<Vec<Chapter>> {
-    sqlx::query_as("SELECT * FROM chapters WHERE course_id = ?1 ORDER BY position, created_at, id")
-        .bind(course_id)
-        .fetch_all(e)
-        .await
+pub async fn chapters_for_course(
+    e: impl SqliteExecutor<'_>,
+    course_id: &str,
+) -> sqlx::Result<Vec<ChapterSummaryRow>> {
+    sqlx::query_as(
+        "SELECT ch.*,
+            (SELECT COUNT(*) FROM notes n WHERE n.chapter_id = ch.id) AS note_count,
+            (SELECT COUNT(*) FROM images i JOIN notes n ON n.id = i.note_id
+              WHERE n.chapter_id = ch.id) AS image_count,
+            (SELECT i.thumb_key FROM images i JOIN notes n ON n.id = i.note_id
+              WHERE n.chapter_id = ch.id
+              ORDER BY n.created_at DESC, n.id DESC, i.position LIMIT 1) AS cover_thumb_key
+         FROM chapters ch WHERE ch.course_id = ?1 ORDER BY ch.position, ch.created_at, ch.id",
+    )
+    .bind(course_id)
+    .fetch_all(e)
+    .await
+}
+
+/// `(courses, chapters, notes, images)` totals.
+pub async fn totals(e: impl SqliteExecutor<'_>) -> sqlx::Result<(i64, i64, i64, i64)> {
+    sqlx::query_as(
+        "SELECT (SELECT COUNT(*) FROM courses), (SELECT COUNT(*) FROM chapters),
+                (SELECT COUNT(*) FROM notes), (SELECT COUNT(*) FROM images)",
+    )
+    .fetch_one(e)
+    .await
 }
 
 pub async fn chapter_by_id(e: impl SqliteExecutor<'_>, id: &str) -> sqlx::Result<Option<Chapter>> {
@@ -252,21 +288,26 @@ pub async fn count_notes(e: impl SqliteExecutor<'_>, chapter_id: &str) -> sqlx::
         .await
 }
 
-/// Notes in upload order (UUIDv7 ids break ties chronologically too).
+/// Notes in upload order, or newest first with `newest_first` (UUIDv7 ids
+/// break ties chronologically too).
 pub async fn notes_page(
     e: impl SqliteExecutor<'_>,
     chapter_id: &str,
     limit: i64,
     offset: i64,
+    newest_first: bool,
 ) -> sqlx::Result<Vec<Note>> {
-    sqlx::query_as(
-        "SELECT * FROM notes WHERE chapter_id = ?1 ORDER BY created_at, id LIMIT ?2 OFFSET ?3",
-    )
-    .bind(chapter_id)
-    .bind(limit)
-    .bind(offset)
-    .fetch_all(e)
-    .await
+    let sql = if newest_first {
+        "SELECT * FROM notes WHERE chapter_id = ?1 ORDER BY created_at DESC, id DESC LIMIT ?2 OFFSET ?3"
+    } else {
+        "SELECT * FROM notes WHERE chapter_id = ?1 ORDER BY created_at, id LIMIT ?2 OFFSET ?3"
+    };
+    sqlx::query_as(sql)
+        .bind(chapter_id)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(e)
+        .await
 }
 
 /// Images for exactly the notes returned by [`notes_page`] with the same arguments.
@@ -275,13 +316,20 @@ pub async fn images_for_notes_page(
     chapter_id: &str,
     limit: i64,
     offset: i64,
+    newest_first: bool,
 ) -> sqlx::Result<Vec<ImageRow>> {
-    sqlx::query_as(
+    let sql = if newest_first {
+        "SELECT i.* FROM images i
+         JOIN (SELECT id FROM notes WHERE chapter_id = ?1
+               ORDER BY created_at DESC, id DESC LIMIT ?2 OFFSET ?3) n ON n.id = i.note_id
+         ORDER BY i.note_id, i.position"
+    } else {
         "SELECT i.* FROM images i
          JOIN (SELECT id FROM notes WHERE chapter_id = ?1
                ORDER BY created_at, id LIMIT ?2 OFFSET ?3) n ON n.id = i.note_id
-         ORDER BY i.note_id, i.position",
-    )
+         ORDER BY i.note_id, i.position"
+    };
+    sqlx::query_as(sql)
     .bind(chapter_id)
     .bind(limit)
     .bind(offset)

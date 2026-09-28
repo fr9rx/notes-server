@@ -12,3 +12,7 @@
 /mcu/zephyr
 /mcu/modules
 /mcu/build
+
+# Frontend build output and deps
+/frontend/dist
+/frontend/node_modules

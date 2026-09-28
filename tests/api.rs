@@ -402,3 +402,77 @@ fn count_files(dir: &std::path::Path) -> usize {
         .map(|e| if e.path().is_dir() { count_files(&e.path()) } else { 1 })
         .sum()
 }
+
+#[tokio::test]
+async fn serves_the_frontend_and_spa_routes() {
+    let t = TestApp::new().await;
+
+    let r = t.get("/").await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(r.headers[header::CONTENT_TYPE].to_str().unwrap().starts_with("text/html"));
+    assert_eq!(r.headers[header::CACHE_CONTROL], "no-cache");
+    assert!(r.headers.contains_key(header::CONTENT_SECURITY_POLICY));
+    let etag = r.headers[header::ETAG].clone();
+
+    // Client-side routes get the same shell, so deep links work.
+    let deep = t.get("/course/math-101/chapter/abc").await;
+    assert_eq!(deep.status, StatusCode::OK);
+    assert_eq!(deep.body, r.body);
+
+    // Revalidation.
+    let req = axum::http::Request::get("/")
+        .header(header::IF_NONE_MATCH, etag)
+        .body(axum::body::Body::empty())
+        .unwrap();
+    assert_eq!(t.call(req).await.status, StatusCode::NOT_MODIFIED);
+
+    // Unknown API routes and assets are real 404s, never the HTML shell.
+    let r = t.get("/api/nope").await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    assert_eq!(r.json()["error"], "endpoint not found");
+    assert_eq!(t.get("/assets/missing-abc123.js").await.status, StatusCode::NOT_FOUND);
+    let r = t.json(Method::POST, "/somewhere", None, json!({})).await;
+    assert_eq!(r.status, StatusCode::METHOD_NOT_ALLOWED);
+}
+
+#[tokio::test]
+async fn stats_and_listing_summaries() {
+    let t = TestApp::new().await;
+    let (slug, chapter_id) = t.course_with_chapter("sum-1").await;
+    t.upload_note(&chapter_id, "a", &[small_jpeg(), small_jpeg()]).await;
+    let newest = t.upload_note(&chapter_id, "b", &[small_jpeg()]).await.json();
+
+    let stats = t.get("/api/stats").await.json();
+    assert_eq!((stats["courses"].as_i64(), stats["chapters"].as_i64()), (Some(1), Some(1)));
+    assert_eq!((stats["notes"].as_i64(), stats["images"].as_i64()), (Some(2), Some(3)));
+    assert_eq!(stats["requests"].as_array().unwrap().len(), 13);
+    assert_eq!(stats["uploads"].as_array().unwrap().len(), 13);
+    assert_eq!(stats["status"], "starting"); // the reporter isn't running in tests
+
+    let courses = t.get("/api/courses").await.json();
+    let c = &courses[0];
+    assert_eq!((c["chapter_count"].as_i64(), c["note_count"].as_i64(), c["image_count"].as_i64()), (Some(1), Some(2), Some(3)));
+    assert_eq!(c["cover_thumb_url"], newest["images"][0]["thumb_url"]);
+
+    let detail = t.get(&format!("/api/courses/{slug}")).await.json();
+    let ch = &detail["chapters"][0];
+    assert_eq!((ch["note_count"].as_i64(), ch["image_count"].as_i64()), (Some(2), Some(3)));
+    assert_eq!(ch["cover_thumb_url"], newest["images"][0]["thumb_url"]);
+    assert_eq!(ch["title"], "Chapter 1"); // flattened chapter fields are still there
+}
+
+#[tokio::test]
+async fn chapter_notes_newest_first() {
+    let t = TestApp::new().await;
+    let (_, chapter_id) = t.course_with_chapter("order-1").await;
+    for i in 0..3 {
+        t.upload_note(&chapter_id, &format!("n{i}"), &[small_jpeg()]).await;
+    }
+    let titles = |v: serde_json::Value| -> Vec<String> {
+        v["notes"].as_array().unwrap().iter().map(|n| n["title"].as_str().unwrap().to_owned()).collect()
+    };
+    assert_eq!(titles(t.get(&format!("/api/chapters/{chapter_id}?order=desc&limit=2")).await.json()), ["n2", "n1"]);
+    assert_eq!(titles(t.get(&format!("/api/chapters/{chapter_id}?order=desc&limit=2&offset=2")).await.json()), ["n0"]);
+    assert_eq!(titles(t.get(&format!("/api/chapters/{chapter_id}?order=asc")).await.json()), ["n0", "n1", "n2"]);
+    assert_eq!(t.get(&format!("/api/chapters/{chapter_id}?order=sideways")).await.status, StatusCode::BAD_REQUEST);
+}

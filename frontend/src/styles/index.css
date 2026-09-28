@@ -1,0 +1,476 @@
+/* "Phosphor & Paper" — design tokens and global styles (see DESIGN.md §2). */
+@import "tailwindcss";
+@import "@fontsource-variable/bricolage-grotesque/wght.css";
+@import "@fontsource-variable/geist/wght.css";
+@import "@fontsource-variable/geist-mono/wght.css";
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* ---- Raw tokens: light ("Graph paper") is the default ---------------------- */
+:root {
+  color-scheme: light;
+  --bg-0: #f6f4ee;
+  --bg-1: #efece4;
+  --surface-1: #ffffff;
+  --surface-2: #fbfaf6;
+  --surface-3: #f1eee6;
+  --border-subtle: #e7e2d7;
+  --border: #d5cfc1;
+  --border-strong: #a9a293;
+  --text-1: #121826;
+  --text-2: #3f4859;
+  --text-3: #5e6778;
+  --text-4: #a3a9b4;
+  --accent: #1f5eff;
+  --accent-fg: #ffffff;
+  --accent-hover: #1748cc;
+  --accent-soft: rgba(31, 94, 255, 0.09);
+  --accent-deep: #1f5eff;
+  --focus: #1f5eff;
+  --highlighter: #ffe16b;
+  --success: #0e8a56;
+  --warning: #9a5b00;
+  --danger: #c8283a;
+  --danger-soft: rgba(200, 40, 58, 0.08);
+  --warning-soft: rgba(154, 91, 0, 0.08);
+  --grid-dot: rgba(31, 60, 120, 0.12);
+  --scrim: rgba(18, 24, 38, 0.55);
+
+  --hl-inset: inset 0 1px 0 0 rgba(255, 255, 255, 0.9);
+  --shadow-1: 0 1px 2px rgba(18, 24, 38, 0.06), 0 0 0 1px rgba(18, 24, 38, 0.04);
+  --shadow-2: 0 10px 28px -12px rgba(18, 24, 38, 0.16);
+  --shadow-3: 0 34px 70px -24px rgba(18, 24, 38, 0.28);
+  --glow-sm: 0 0 0 4px rgba(31, 94, 255, 0.12);
+  --glow-md: 0 0 24px 0 rgba(31, 94, 255, 0.14);
+  --glow-lg: 0 0 60px 0 rgba(31, 94, 255, 0.1);
+  --spot: rgba(31, 94, 255, 0.08);
+  --spot-ring: rgba(31, 94, 255, 0.45);
+
+  /* The LED plate is always a dark physical board. */
+  --plate: #060a13;
+  --plate-bezel: #2a3350;
+  --plate-silk: #56647f;
+  --plate-screw: #222c44;
+  --led-0: #0d1628;
+  --led-1: #16305f;
+  --led-2: #2457b4;
+  --led-3: #2e6cd8;
+  --led-4: #3a81f1;
+  --led-5: #4c9aff;
+  --led-6: #8cbeff;
+  --led-7: #dcebff;
+
+  --grain-opacity: 0.05;
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+}
+
+/* ---- Dark ("Lab at night") --------------------------------------------------- */
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg-0: #05070d;
+  --bg-1: #0a0f1a;
+  --surface-1: #0f1624;
+  --surface-2: #151e30;
+  --surface-3: #1c2740;
+  --border-subtle: #1a2438;
+  --border: #26334d;
+  --border-strong: #3a4b6e;
+  --text-1: #eaf0fa;
+  --text-2: #a9b6cc;
+  --text-3: #8090ad;
+  --text-4: #4a5874;
+  --accent: #4c9aff;
+  --accent-fg: #031026;
+  --accent-hover: #6aadff;
+  --accent-soft: rgba(76, 154, 255, 0.14);
+  --accent-deep: #1e5bff;
+  --focus: #7db5ff;
+  --highlighter: #ffd84a;
+  --success: #3dd68c;
+  --warning: #ffb547;
+  --danger: #ff6470;
+  --danger-soft: rgba(255, 100, 112, 0.12);
+  --warning-soft: rgba(255, 181, 71, 0.1);
+  --grid-dot: rgba(122, 150, 200, 0.1);
+  --scrim: rgba(3, 5, 10, 0.72);
+
+  --hl-inset: inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-2: 0 10px 30px -12px rgba(0, 0, 0, 0.65);
+  --shadow-3: 0 30px 80px -20px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.03);
+  --glow-sm: 0 0 12px 0 rgba(76, 154, 255, 0.35);
+  --glow-md: 0 0 32px 0 rgba(76, 154, 255, 0.28);
+  --glow-lg: 0 0 90px 10px rgba(30, 91, 255, 0.22);
+  --spot: rgba(76, 154, 255, 0.16);
+  --spot-ring: rgba(76, 154, 255, 0.6);
+  --plate-bezel: #1a2238;
+  --grain-opacity: 0.035;
+}
+
+/* ---- Tailwind mapping (utilities resolve at runtime) ------------------------ */
+@theme inline {
+  --color-bg-0: var(--bg-0);
+  --color-bg-1: var(--bg-1);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line-subtle: var(--border-subtle);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+  --color-fg-1: var(--text-1);
+  --color-fg-2: var(--text-2);
+  --color-fg-3: var(--text-3);
+  --color-fg-4: var(--text-4);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-hi: var(--highlighter);
+  --color-ok: var(--success);
+  --color-warn: var(--warning);
+  --color-err: var(--danger);
+  --color-err-soft: var(--danger-soft);
+  --color-warn-soft: var(--warning-soft);
+  --color-plate: var(--plate);
+  --font-display: "Bricolage Grotesque Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "SFMono-Regular", monospace;
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+  --shadow-1: var(--shadow-1);
+  --shadow-2: var(--shadow-2);
+  --shadow-3: var(--shadow-3);
+  --breakpoint-xs: 420px;
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ---- Type scale (§2.4) -------------------------------------------------------- */
+@utility t-display-xl {
+  font-family: var(--font-display);
+  font-size: clamp(2.75rem, 1.6rem + 5.1vw, 6rem);
+  line-height: 0.95;
+  font-weight: 720;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+@utility t-display-l {
+  font-family: var(--font-display);
+  font-size: clamp(2.25rem, 1.6rem + 2.9vw, 4rem);
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  text-wrap: balance;
+}
+@utility t-display-m {
+  font-family: var(--font-display);
+  font-size: clamp(1.75rem, 1.4rem + 1.6vw, 2.75rem);
+  line-height: 1.05;
+  font-weight: 680;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+@utility t-title-l {
+  font-family: var(--font-display);
+  font-size: clamp(1.375rem, 1.25rem + 0.55vw, 1.75rem);
+  line-height: 1.15;
+  font-weight: 640;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+@utility t-title-m {
+  font-size: 1.125rem;
+  line-height: 1.35;
+  font-weight: 580;
+  letter-spacing: -0.01em;
+}
+@utility t-title-s {
+  font-size: 1rem;
+  line-height: 1.4;
+  font-weight: 560;
+  letter-spacing: -0.005em;
+}
+@utility t-body-l {
+  font-size: clamp(1.0625rem, 1rem + 0.3vw, 1.25rem);
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+@utility t-body {
+  font-size: 1rem;
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+@utility t-body-s {
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+@utility t-label {
+  font-size: 0.875rem;
+  line-height: 1.2;
+  font-weight: 540;
+}
+@utility t-meta {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  font-weight: 450;
+  font-variant-numeric: tabular-nums;
+}
+@utility t-caption {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  line-height: 1.3;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+}
+@utility t-counter {
+  font-family: var(--font-mono);
+  font-size: clamp(2rem, 1.5rem + 2.2vw, 3.5rem);
+  line-height: 1;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Base ---------------------------------------------------------------------- */
+@layer base {
+  html {
+    background: var(--bg-0);
+    -webkit-text-size-adjust: 100%;
+    scroll-padding-top: 80px;
+  }
+  body {
+    background: var(--bg-0);
+    color: var(--text-1);
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    min-height: 100dvh;
+    overflow-x: clip;
+  }
+  ::selection {
+    background: var(--highlighter);
+    color: #1a1400;
+  }
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 6px var(--accent-soft);
+  }
+  button,
+  [role="button"] {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  img {
+    user-select: none;
+    -webkit-user-drag: none;
+  }
+}
+
+/* Page dot grid, strongest at the top (§2.8). */
+.page-grid {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: radial-gradient(circle at 1px 1px, var(--grid-dot) 1px, transparent 0);
+  background-size: 20px 20px;
+  mask-image: linear-gradient(to bottom, #000 0, #000 40vh, transparent 110vh);
+}
+@media (min-width: 640px) {
+  .page-grid {
+    background-size: 24px 24px;
+  }
+}
+
+/* Static grain overlay (never animated). */
+.grain {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  pointer-events: none;
+  background-image: url("../assets/grain.png");
+  background-size: 160px 160px;
+  opacity: var(--grain-opacity);
+  mix-blend-mode: overlay;
+}
+
+/* Dot shimmer skeleton (§6.13). */
+.dot-shimmer {
+  position: relative;
+  overflow: hidden;
+  background-color: var(--surface-2);
+  background-image: radial-gradient(circle, var(--led-1) 1.2px, transparent 1.4px);
+  background-size: 8px 8px;
+}
+:root:not([data-theme="dark"]) .dot-shimmer {
+  background-image: radial-gradient(circle, rgba(31, 94, 255, 0.1) 1.2px, transparent 1.4px);
+}
+.dot-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, var(--led-4) 1.2px, transparent 1.4px);
+  background-size: 8px 8px;
+  mask-image: linear-gradient(100deg, transparent 35%, #000 50%, transparent 65%);
+  mask-size: 300% 100%;
+  animation: dot-scan 1.6s linear infinite;
+  animation-delay: var(--shimmer-delay, 0ms);
+}
+:root:not([data-theme="dark"]) .dot-shimmer::after {
+  background-image: radial-gradient(circle, rgba(31, 94, 255, 0.22) 1.2px, transparent 1.4px);
+}
+@keyframes dot-scan {
+  from {
+    mask-position: 100% 0;
+  }
+  to {
+    mask-position: -50% 0;
+  }
+}
+
+/* LED halftone covers (§6.2): the photo reads as LED dots until revealed. */
+.halftone {
+  position: absolute;
+  inset: 0;
+  background: var(--led-2);
+  mask-image: radial-gradient(circle, #000 1.6px, transparent 2.1px);
+  mask-size: 6px 6px;
+}
+.halftone > img {
+  mix-blend-mode: screen;
+  filter: grayscale(1) contrast(1.15) brightness(0.9);
+}
+:root:not([data-theme="dark"]) .halftone {
+  background: #dfe6f5;
+}
+:root:not([data-theme="dark"]) .halftone > img {
+  mix-blend-mode: multiply;
+}
+
+/* Spotlight + spotlight border following the pointer (--mx/--my set from JS). */
+.spotlight {
+  position: relative;
+  isolation: isolate;
+}
+.spotlight::before,
+.spotlight::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 150ms var(--ease-out-soft);
+}
+.spotlight::before {
+  z-index: 0;
+  background: radial-gradient(360px circle at var(--mx, 50%) var(--my, 50%), var(--spot), transparent 45%);
+}
+.spotlight::after {
+  z-index: 2;
+  padding: 1px;
+  background: radial-gradient(260px circle at var(--mx, 50%) var(--my, 50%), var(--spot-ring), transparent 50%);
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+}
+@media (hover: hover) and (pointer: fine) {
+  .spotlight:hover::before,
+  .spotlight:hover::after,
+  .spotlight:focus-visible::before,
+  .spotlight:focus-visible::after {
+    opacity: 1;
+  }
+}
+
+/* LED sheen sweep on primary buttons. */
+.sheen {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.sheen::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40%;
+  left: -60%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.18), transparent);
+  transform: translateX(0);
+}
+@media (hover: hover) {
+  button:hover > .sheen::before,
+  a:hover > .sheen::before {
+    animation: sheen 700ms cubic-bezier(0.22, 1, 0.36, 1) 1;
+  }
+}
+@keyframes sheen {
+  to {
+    transform: translateX(400%);
+  }
+}
+
+/* Marching dotted border (SVG rect). */
+.marching {
+  animation: march 600ms linear infinite;
+}
+@keyframes march {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+
+/* The circular theme reveal (§6.14). */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+.theme-switching,
+.theme-switching * {
+  transition:
+    background-color 200ms,
+    color 200ms,
+    border-color 200ms !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot-shimmer::after,
+  .marching {
+    animation: none;
+  }
+  .sheen {
+    display: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --border-subtle: var(--border-strong);
+    --border: var(--border-strong);
+  }
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

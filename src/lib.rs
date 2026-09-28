@@ -8,6 +8,7 @@ pub mod models;
 pub mod routes;
 pub mod storage;
 pub mod tls;
+pub mod web;
 
 use std::io;
 use std::net::SocketAddr;

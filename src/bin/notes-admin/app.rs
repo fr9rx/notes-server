@@ -268,7 +268,8 @@ impl App {
             let api = self.api();
             match self.rt.block_on(api.course(&course.slug)) {
                 Ok(detail) => {
-                    self.chapters_cache.insert(course.id.clone(), detail.chapters);
+                    let chapters = detail.chapters.into_iter().map(|c| c.chapter).collect();
+                    self.chapters_cache.insert(course.id.clone(), chapters);
                 }
                 Err(e) => {
                     self.chapters.clear();
@@ -573,7 +574,8 @@ impl App {
                 if !app.chapters_cache.contains_key(&course.id) {
                     match app.rt.block_on(api.course(&course.slug)) {
                         Ok(d) => {
-                            app.chapters_cache.insert(course.id.clone(), d.chapters);
+                            let chapters = d.chapters.into_iter().map(|c| c.chapter).collect();
+                            app.chapters_cache.insert(course.id.clone(), chapters);
                         }
                         Err(e) => return app.fail(e),
                     }

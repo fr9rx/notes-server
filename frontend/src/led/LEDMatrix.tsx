@@ -1,0 +1,431 @@
+import clsx from "clsx";
+import { useReducedMotion } from "motion/react";
+import { useEffect, useRef } from "react";
+
+import { useTheme } from "../app/theme";
+import { liveNow, subscribeLive, useLive } from "../stats/store";
+import { sprites } from "./sprites";
+import {
+  H,
+  MAX,
+  UPLOAD_ANIM_MS,
+  W,
+  drawArrow,
+  drawCheck,
+  drawDashboard,
+  drawMonogram,
+  drawStarting,
+  drawStopped,
+  drawText,
+  drawWaiting,
+  drawX,
+  newFrame,
+  textScrollDone,
+  textScrollX,
+  type Frame,
+} from "./views";
+
+export type LEDPattern =
+  | "waiting"
+  | "starting"
+  | "x"
+  | "blinkX"
+  | "arrow"
+  | "arrowLoop"
+  | "check"
+  | "404"
+  | "monogram"
+  | "stopped"
+  | "warning";
+
+export type LEDSize = "micro" | "xs" | "sm" | "md" | "lg" | "hero";
+
+const SIZES: Record<LEDSize, { dot: number; pitch: number; pad: number; radius: number }> = {
+  micro: { dot: 2, pitch: 3, pad: 0, radius: 0 },
+  xs: { dot: 3, pitch: 5, pad: 6, radius: 10 },
+  sm: { dot: 5, pitch: 8, pad: 10, radius: 14 },
+  md: { dot: 8, pitch: 12, pad: 16, radius: 28 },
+  lg: { dot: 11, pitch: 17, pad: 20, radius: 28 },
+  hero: { dot: 14, pitch: 22, pad: 24, radius: 28 },
+};
+
+export interface LEDMatrixProps {
+  /** "stats" mirrors the board live; otherwise `pattern`/`text`. */
+  source?: "stats" | "pattern" | "text";
+  pattern?: LEDPattern;
+  /** Scrolls once (then `onTextDone`), or forever with `loopText`. Overrides the view while scrolling. */
+  text?: string;
+  loopText?: boolean;
+  onTextDone?: () => void;
+  monogram?: string;
+  /** Seed for the monogram's sparkle dot (the course slug). */
+  seed?: string;
+  size?: LEDSize;
+  /** Override dot/pitch (CSS px). */
+  dot?: number;
+  pitch?: number;
+  plate?: boolean;
+  glow?: boolean;
+  /** Play the firmware "starting" comet first (hero boot moment). */
+  boot?: boolean;
+  /** Changing this number plays a top-to-bottom scanline (card hover). */
+  scan?: number;
+  label?: string;
+  screws?: boolean;
+  silk?: string;
+  className?: string;
+  /** Called with 0..1 average brightness each frame (hero bloom). */
+  onBrightness?: (b: number) => void;
+}
+
+/** Remembers once per session that the hero plate has "booted". */
+let bootedThisSession = (() => {
+  try {
+    return sessionStorage.getItem("led-booted") === "1";
+  } catch {
+    return false;
+  }
+})();
+
+export function LEDMatrix({
+  source = "pattern",
+  pattern = "waiting",
+  text,
+  loopText,
+  onTextDone,
+  monogram,
+  seed = "",
+  size = "sm",
+  dot: dotOverride,
+  pitch: pitchOverride,
+  plate,
+  glow: glowProp,
+  boot,
+  scan,
+  label,
+  screws,
+  silk,
+  className,
+  onBrightness,
+}: LEDMatrixProps) {
+  const { theme } = useTheme();
+  const reduced = useReducedMotion() ?? false;
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const geo = SIZES[size];
+  const dot = dotOverride ?? geo.dot;
+  const pitch = pitchOverride ?? geo.pitch;
+  const showPlate = plate ?? (size === "md" || size === "lg" || size === "hero" || size === "sm");
+  const glow = glowProp ?? (theme === "dark" && (size === "md" || size === "lg" || size === "hero"));
+  const width = W * pitch;
+  const height = H * pitch;
+
+  // Everything the render loop reads lives in a ref, so props changes don't restart it.
+  const props = useRef({ source, pattern, text, loopText, onTextDone, monogram, seed, reduced, onBrightness });
+  props.current = { source, pattern, text, loopText, onTextDone, monogram, seed, reduced, onBrightness };
+
+  const textStart = useRef(0);
+  useEffect(() => {
+    textStart.current = performance.now();
+  }, [text]);
+
+  const scanStart = useRef(-Infinity);
+  useEffect(() => {
+    if (scan) scanStart.current = performance.now();
+  }, [scan]);
+
+  // Screen-reader summary of the live board, refreshed at most every 10 s.
+  const live = useLive();
+  const aria = label ?? (source === "stats" ? ariaFor(live) : undefined);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const g = canvas.getContext("2d");
+    if (!g) return;
+
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const set = sprites(dot, dpr, glow);
+    const margin = Math.ceil(set.size / dpr / 2);
+    canvas.width = Math.round((width + margin * 2) * dpr);
+    canvas.height = Math.round((height + margin * 2) * dpr);
+    canvas.style.width = `${width + margin * 2}px`;
+    canvas.style.height = `${height + margin * 2}px`;
+    canvas.style.margin = `-${margin}px`;
+
+    const mountedAt = performance.now();
+    const doBoot = boot && !bootedThisSession && !props.current.reduced;
+    if (boot && !bootedThisSession) {
+      bootedThisSession = true;
+      try {
+        sessionStorage.setItem("led-booted", "1");
+      } catch {
+        // ignore
+      }
+    }
+
+    const shown = new Float32Array(W * H); // phosphor persistence
+    let lastFrameAt = mountedAt;
+    let lastTick = liveNow().tick;
+    let shiftAt = -Infinity;
+    let arrowAt = -Infinity;
+    let lastLocalUpload = liveNow().localUploadAt;
+    let textDoneFired = false;
+    let raf = 0;
+    let visible = true;
+    const fpsCap = size === "micro" || size === "xs" ? 30 : 60;
+    let lastDraw = 0;
+
+    const compute = (now: number): { frame: Frame; still: boolean } => {
+      const p = props.current;
+      const f = newFrame();
+      const t = now - mountedAt;
+      let still = false;
+
+      // Text scroll overrides the view while it runs (like the firmware).
+      if (p.text) {
+        const elapsed = now - textStart.current;
+        const done = textScrollDone(p.text, elapsed);
+        if (!done || p.loopText) {
+          const e = p.loopText ? elapsed % ((13 + p.text.length * 4 + 4) * 70) : elapsed;
+          drawText(f, p.text, textScrollX(e));
+          return { frame: f, still: false };
+        }
+        if (!textDoneFired) {
+          textDoneFired = true;
+          queueMicrotask(() => p.onTextDone?.());
+        }
+      } else {
+        textDoneFired = false;
+      }
+
+      if (doBoot && t < 840) {
+        drawStarting(f, t);
+        return { frame: f, still: false };
+      }
+
+      if (p.source === "stats") {
+        const snap = liveNow();
+        if (snap.tick !== lastTick) {
+          lastTick = snap.tick;
+          shiftAt = now;
+          if ((snap.stats?.uploads[12] ?? 0) > 0) arrowAt = now;
+        }
+        if (snap.localUploadAt !== lastLocalUpload) {
+          lastLocalUpload = snap.localUploadAt;
+          arrowAt = now;
+        }
+        const inArrow = now - arrowAt < UPLOAD_ANIM_MS;
+        if (snap.state === "down") {
+          if (Math.floor(now / 500) % 2 === 0) drawX(f);
+        } else if (snap.state === "error") {
+          drawX(f);
+        } else if (snap.state === "waiting" || !snap.stats) {
+          drawWaiting(f, t);
+        } else if (inArrow && !p.reduced) {
+          drawArrow(f, now - arrowAt);
+        } else if (inArrow && p.reduced) {
+          f.fill(5); // reduced motion: a brief flash instead of the flight
+        } else {
+          drawDashboard(f, {
+            requests: snap.stats.requests,
+            uploads: snap.stats.uploads,
+            warning: snap.state === "warning",
+            now,
+            sinceStatus: now - snap.tickAt,
+            newestMaxHeight: p.reduced ? undefined : Math.floor((now - shiftAt) / 35),
+          });
+        }
+        return { frame: f, still: false };
+      }
+
+      switch (p.pattern) {
+        case "waiting":
+          drawWaiting(f, t);
+          break;
+        case "starting":
+          drawStarting(f, t);
+          break;
+        case "x":
+          drawX(f);
+          still = true;
+          break;
+        case "blinkX":
+          if (Math.floor(t / 500) % 2 === 0) drawX(f);
+          break;
+        case "arrow":
+          if (t < UPLOAD_ANIM_MS) drawArrow(f, t);
+          else still = true;
+          break;
+        case "arrowLoop":
+          if (t % 2400 < UPLOAD_ANIM_MS) drawArrow(f, t % 2400);
+          break;
+        case "check":
+          drawCheck(f);
+          still = true;
+          break;
+        case "404":
+          // One glitch to the firmware X every 6 s, for 2 frames.
+          if (!p.reduced && t % 6000 > 5880) drawX(f);
+          else drawText(f, "404", 1);
+          break;
+        case "monogram":
+          drawMonogram(f, p.monogram ?? "", p.seed);
+          still = true;
+          break;
+        case "stopped":
+          drawStopped(f);
+          still = true;
+          break;
+        case "warning":
+          if (Math.floor(t / 500) % 2 === 0) for (let x = 0; x < W; x++) f[x] = MAX;
+          break;
+      }
+
+      // Hover scanline: rows light to max top -> bottom, 40 ms per row.
+      const s = now - scanStart.current;
+      if (s >= 0 && s < 40 * (H + 2)) {
+        const row = Math.floor(s / 40);
+        for (let x = 0; x < W; x++) {
+          const i = row * W + x;
+          if (row < H && (f[i] ?? 0) > 0) f[i] = MAX;
+        }
+        still = false;
+      }
+      return { frame: f, still };
+    };
+
+    const draw = (now: number) => {
+      const { frame, still } = compute(now);
+      const reducedNow = props.current.reduced;
+      const dt = now - lastFrameAt;
+      lastFrameAt = now;
+      // Phosphor: rises are instant, falls decay one level per 45 ms.
+      let settling = false;
+      for (let i = 0; i < frame.length; i++) {
+        const target = frame[i] ?? 0;
+        const cur = shown[i] ?? 0;
+        if (reducedNow || target >= cur) shown[i] = target;
+        else {
+          shown[i] = Math.max(target, cur - dt / 45);
+          settling = true;
+        }
+      }
+
+      g.clearRect(0, 0, canvas.width, canvas.height);
+      let sum = 0;
+      const off = margin * dpr - set.size / 2 + (pitch / 2) * dpr;
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const level = Math.round(shown[y * W + x] ?? 0);
+          sum += level;
+          const sprite = set.levels[level];
+          if (sprite) g.drawImage(sprite, off + x * pitch * dpr, off + y * pitch * dpr);
+        }
+      }
+      props.current.onBrightness?.(sum / (W * H * MAX));
+      return still && !settling;
+    };
+
+    const loop = (now: number) => {
+      raf = 0;
+      if (!visible || document.hidden) return;
+      if (now - lastDraw >= 1000 / fpsCap - 2) {
+        lastDraw = now;
+        if (draw(now)) return; // static: stop until something changes
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    const kick = () => {
+      if (!raf && visible && !document.hidden) raf = requestAnimationFrame(loop);
+    };
+
+    const io = new IntersectionObserver(([entry]) => {
+      visible = entry?.isIntersecting ?? true;
+      kick();
+    });
+    io.observe(canvas);
+    document.addEventListener("visibilitychange", kick);
+    const unsub = source === "stats" ? subscribeLive(kick) : undefined;
+    kick();
+    // Props like `pattern`/`text`/`scan` change through the ref; poll for a restart cheaply.
+    const wake = window.setInterval(kick, 250);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      io.disconnect();
+      document.removeEventListener("visibilitychange", kick);
+      window.clearInterval(wake);
+      unsub?.();
+    };
+  }, [dot, pitch, glow, width, height, size, source, boot]);
+
+  const canvas = (
+    <canvas
+      ref={canvasRef}
+      className="block"
+      role="img"
+      aria-label={aria}
+      aria-hidden={aria ? undefined : true}
+    />
+  );
+
+  if (!showPlate) {
+    return (
+      <span className={clsx("inline-block overflow-visible", className)} style={{ width, height }}>
+        {canvas}
+      </span>
+    );
+  }
+
+  return (
+    <div
+      className={clsx("relative inline-flex flex-col items-center", className)}
+      style={{
+        padding: geo.pad,
+        borderRadius: geo.radius,
+        background: "var(--plate)",
+        border: "1px solid var(--plate-bezel)",
+        boxShadow:
+          "inset 0 1px 0 rgba(255,255,255,0.04), inset 0 -12px 24px rgba(0,0,0,0.35), var(--shadow-2)",
+      }}
+    >
+      {(screws ?? (size === "md" || size === "lg" || size === "hero")) && <Screws />}
+      <span className="relative block overflow-visible" style={{ width, height }}>
+        {canvas}
+      </span>
+      {silk && (
+        <span className="t-caption mt-3 select-none" style={{ color: "var(--plate-silk)", fontSize: 10 }}>
+          {silk}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function Screws() {
+  const s = { background: "var(--plate-screw)" } as const;
+  return (
+    <>
+      {["left-2 top-2", "right-2 top-2", "bottom-2 left-2", "bottom-2 right-2"].map((pos) => (
+        <span key={pos} aria-hidden className={clsx("absolute h-1 w-1 rounded-full", pos)} style={s} />
+      ))}
+    </>
+  );
+}
+
+let lastAria = "";
+let lastAriaAt = 0;
+function ariaFor(live: ReturnType<typeof liveNow>): string {
+  const now = Date.now();
+  if (lastAria && now - lastAriaAt < 10_000) return lastAria;
+  const s = live.stats;
+  const text =
+    live.state === "down"
+      ? "Server status: the board is not answering."
+      : live.state === "waiting" || !s
+        ? "Server status: connecting to the board."
+        : `Server status: ${s.status}. ${s.requests[12] ?? 0} requests per second, ${s.uploads.reduce((a, b) => a + b, 0)} photos uploaded in the last 13 seconds.`;
+  lastAria = text;
+  lastAriaAt = now;
+  return text;
+}

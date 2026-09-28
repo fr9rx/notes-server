@@ -1,6 +1,7 @@
 mod chapters;
 mod courses;
 mod notes;
+mod stats;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -104,10 +105,18 @@ pub fn router(state: AppState) -> Router {
     let metrics = state.metrics.clone();
     Router::new()
         .merge(api)
+        .route("/api/stats", get(stats::get))
         .route("/health", get(|| async { "ok" }))
         .nest_service("/files", files)
-        .layer(axum::middleware::from_fn(move |req, next: axum::middleware::Next| {
-            metrics.record_request();
+        // Everything else: the React app (static assets + client-side routes).
+        .fallback(crate::web::serve)
+        .layer(axum::middleware::from_fn(move |req: axum::extract::Request, next: axum::middleware::Next| {
+            // Count real traffic for the LED graph: the API and images, but not the
+            // website's own stats polling or its static assets.
+            let path = req.uri().path();
+            if (path.starts_with("/api/") && path != "/api/stats") || path.starts_with("/files/") {
+                metrics.record_request();
+            }
             next.run(req)
         }))
         .layer(TraceLayer::new_for_http())

@@ -24,10 +24,11 @@
 //! dropped when the link is busy or absent, and the link thread reconnects on
 //! its own (for example when the router restarts).
 
+use std::collections::VecDeque;
 use std::io::{self, Write};
 use std::net::UdpSocket;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::time::{Duration, Instant};
@@ -44,11 +45,40 @@ const REQUEST: u64 = 0;
 const RESPONSE: u64 = 1;
 const NOTIFICATION: u64 = 2;
 
-/// Request/upload counters, drained once a second by [`report`].
-#[derive(Debug, Default)]
+/// Seconds of history kept: one per LED matrix column.
+pub const HISTORY_SECS: usize = 13;
+
+/// Request/upload counters, drained once a second by [`report`], plus the
+/// recent history and status that `GET /api/stats` shows.
+#[derive(Debug)]
 pub struct Metrics {
     requests: AtomicU64,
     uploads: AtomicU64,
+    history: Mutex<VecDeque<(u64, u64)>>,
+    status: Mutex<Status>,
+    started: Instant,
+}
+
+impl Default for Metrics {
+    fn default() -> Self {
+        Self {
+            requests: AtomicU64::new(0),
+            uploads: AtomicU64::new(0),
+            history: Mutex::new(VecDeque::with_capacity(HISTORY_SECS)),
+            status: Mutex::new(Status::Starting),
+            started: Instant::now(),
+        }
+    }
+}
+
+/// What `GET /api/stats` reports about the live server.
+#[derive(Debug, Clone)]
+pub struct Snapshot {
+    pub status: Status,
+    pub uptime_secs: u64,
+    /// Oldest first, always `HISTORY_SECS` long.
+    pub requests: Vec<u64>,
+    pub uploads: Vec<u64>,
 }
 
 impl Metrics {
@@ -60,12 +90,37 @@ impl Metrics {
         self.uploads.fetch_add(images as u64, Ordering::Relaxed);
     }
 
-    /// Returns and resets `(requests, uploaded images)`.
+    /// Returns and resets `(requests, uploaded images)` for the last second
+    /// and appends them to the history.
     pub fn take(&self) -> (u64, u64) {
-        (
+        let sample = (
             self.requests.swap(0, Ordering::Relaxed),
             self.uploads.swap(0, Ordering::Relaxed),
-        )
+        );
+        let mut history = self.history.lock().unwrap_or_else(|e| e.into_inner());
+        if history.len() == HISTORY_SECS {
+            history.pop_front();
+        }
+        history.push_back(sample);
+        sample
+    }
+
+    pub fn set_status(&self, status: Status) {
+        *self.status.lock().unwrap_or_else(|e| e.into_inner()) = status;
+    }
+
+    pub fn snapshot(&self) -> Snapshot {
+        let history = self.history.lock().unwrap_or_else(|e| e.into_inner());
+        let pad = HISTORY_SECS - history.len();
+        let series = |pick: fn(&(u64, u64)) -> u64| {
+            std::iter::repeat_n(0, pad).chain(history.iter().map(pick)).collect()
+        };
+        Snapshot {
+            status: *self.status.lock().unwrap_or_else(|e| e.into_inner()),
+            uptime_secs: self.started.elapsed().as_secs(),
+            requests: series(|s| s.0),
+            uploads: series(|s| s.1),
+        }
     }
 }
 
@@ -81,6 +136,16 @@ pub enum Status {
 }
 
 impl Status {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Starting => "starting",
+            Self::Ok => "ok",
+            Self::Warning => "warning",
+            Self::Error => "error",
+            Self::Stopping => "stopping",
+        }
+    }
+
     fn code(self) -> &'static str {
         match self {
             Self::Starting => "B",
@@ -374,6 +439,7 @@ pub async fn report(state: AppState, matrix: Matrix) {
             }
         }
         let (requests, uploads) = state.metrics.take();
+        state.metrics.set_status(status);
         matrix.status(status, requests, uploads);
         last_status = status;
     }
@@ -473,6 +539,15 @@ mod tests {
         m.record_uploads(3);
         assert_eq!(m.take(), (2, 3));
         assert_eq!(m.take(), (0, 0));
+        let snap = m.snapshot();
+        assert_eq!(snap.requests.len(), HISTORY_SECS);
+        assert_eq!(&snap.requests[HISTORY_SECS - 2..], &[2, 0]);
+        assert_eq!(&snap.uploads[HISTORY_SECS - 2..], &[3, 0]);
+        for _ in 0..20 {
+            m.record_request();
+            m.take();
+        }
+        assert_eq!(m.snapshot().requests, vec![1; HISTORY_SECS]);
     }
 
     #[test]

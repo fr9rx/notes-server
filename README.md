@@ -25,19 +25,55 @@ The two chips are separate, with no shared memory; they're connected by a UART (
 
 The router keeps running, so Arduino App Lab and the cloud connector keep working. Everything is built on a Windows laptop and deployed over USB with adb.
 
+## Website
+
+The site is a React app in `frontend/`. It's compiled into the server binary, so the board still gets one file to deploy. The server serves it with ETags, a one-year cache on hashed assets, and precompressed brotli/gzip, so the board never compresses anything at request time. Any path outside `/api` and `/files` returns the app, so deep links work.
+
+The design spec is `frontend/DESIGN.md` ("Phosphor & Paper"). The site grows out of the board's blue 8×13 LED matrix:
+- **Home:**
+  - a canvas LED field whose clouds drift and follow the cursor, with a ripple from the plate on every real request;
+  - a live replica of the board's matrix, driven by `GET /api/stats` using the same drawing code as the firmware;
+  - a word-by-word headline reveal;
+  - counters with rolling digits;
+  - course cards with an LED-halftone cover that reveals the real photo on hover, 3D tilt, a spotlight border and an LED monogram.
+- **Course:** the card morphs into the page header, and a dotted "signal" rail lights up as you scroll down the chapters.
+- **Chapter:** a masonry grid laid out from the known photo sizes (no layout shift), paging with an LED loader, newest/oldest sorting, and drag-and-drop anywhere on the page.
+- **Note:** the cover morphs into a lightbox with swipe, swipe-down to dismiss, pinch, double-tap and ctrl+wheel zoom, keyboard shortcuts, a thumbnail strip, blur-up to the full photo, and download or share.
+- **Upload:** the button morphs into a sheet with:
+  - a dotted dropzone and camera capture;
+  - photos you can reorder;
+  - per-photo LED progress;
+  - its own state for every server error, including a 429 countdown;
+  - a success celebration: the board's upload arrow, a burst of LED particles, and then the new photo flies into the lightbox.
+- **Throughout:**
+  - light and dark themes, switched with a circular reveal;
+  - a full `prefers-reduced-motion` fallback;
+  - self-hosted fonts, so it works offline on a LAN.
+
+```powershell
+cd frontend
+npm ci
+npm run dev        # http://localhost:5173, proxies /api and /files to https://localhost:3443 (cargo run)
+npm run build      # -> frontend/dist, which the next cargo build embeds
+npm test           # LED view parity tests against the firmware
+node scripts/shots.mjs https://localhost:3443 shots   # screenshots of every screen (Edge/Chrome)
+```
+
+`cargo build` without Node still works. `build.rs` puts a placeholder page in `frontend/dist`, and `deploy\build-unoq.ps1` always builds the real site first.
+
 ## API
 
 The server returns JSON everywhere. Errors look like `{"error": "..."}`. Admin routes need `Authorization: Bearer <ADMIN_TOKEN>`.
 
 | Method & path | Who | |
 |---|---|---|
-| `GET /api/courses` | public | List of courses |
+| `GET /api/courses` | public | List of courses, each with chapter/note/photo counts and a cover thumbnail |
 | `GET /api/courses/{slug}` | public | The course with its chapters, in order |
 | `POST /api/courses` | admin | `{"slug":"math-101","name":"Math 101","description":"..."}` |
 | `PATCH /api/courses/{slug}` | admin | Any of `slug`, `name`, `description` |
 | `DELETE /api/courses/{slug}` | admin | Deletes the course's chapters, notes and files too |
 | `POST /api/courses/{slug}/chapters` | admin | `{"title":"Limits","position":0}`; with no `position`, the chapter goes at the end |
-| `GET /api/chapters/{id}?limit=50&offset=0` | public | The chapter plus a page of its notes (oldest first) with their images |
+| `GET /api/chapters/{id}?limit=50&offset=0&order=asc` | public | The chapter plus a page of its notes with their images; `order=desc` for newest first |
 | `PATCH /api/chapters/{id}` | admin | `title`, `position` |
 | `DELETE /api/chapters/{id}` | admin | Deletes the chapter's notes and files too |
 | `POST /api/chapters/{id}/notes` | **public** | multipart form: `title`, `body?`, `author_name?`, `images` (1–10 files, 10 MB each) |
@@ -47,6 +83,7 @@ The server returns JSON everywhere. Errors look like `{"error": "..."}`. Admin r
 | `POST /api/notes/{id}/images` | admin | multipart form: `images`; they're added after the existing images |
 | `DELETE /api/notes/{id}/images/{image_id}` | admin | |
 | `GET /files/...` | public | The image files (URLs appear in the responses as `url` / `thumb_url`) |
+| `GET /api/stats` | public | Totals plus the live LED numbers: requests and uploads per second for the last 13 s, uptime, status |
 | `GET /api/auth/check` | admin | `204` if the token is valid (used by `notes-admin` to log in) |
 | `GET /health` | public | `ok` |
 
@@ -187,7 +224,9 @@ python -m venv .venv
 cd zephyr; ..\.venv\Scripts\west sdk install -t arm-zephyr-eabi; cd ..\..
 ```
 
-You also need **adb**, which comes with Android platform-tools or Arduino App Lab. The deploy script finds either one.
+You also need:
+- **adb**, which comes with Android platform-tools or Arduino App Lab. The deploy script finds either one.
+- **Node.js LTS** for the website, for example `winget install OpenJS.NodeJS.LTS`, or the portable zip from nodejs.org on your PATH.
 
 The server build uses zig for one job: it's the C compiler and linker for the little C code in the dependencies (bundled SQLite and `ring`'s crypto). Everything else is Rust, and zig isn't part of the finished binary.
 
@@ -318,7 +357,9 @@ src/db.rs             all SQL (sqlx + SQLite, WAL mode); schema in migrations/
 src/storage.rs        files on disk: notes/{note_id}/{image_id}.jpg + _thumb.jpg
 src/auth.rs           admin bearer-token check (constant-time)
 src/tls.rs            rustls (ring), certificate reload, HTTP→HTTPS redirect + ACME webroot
+src/web.rs            serves the embedded React app (ETag, immutable assets, precompressed br/gz, SPA fallback)
 src/bin/notes-admin/  admin TUI (ratatui): api.rs client, app.rs state/actions, ui.rs rendering
+frontend/             React 19 + motion + Tailwind 4 website; DESIGN.md is the design spec
 mcu/notes-matrix/     Zephyr firmware: matrix.c (charlieplex), link.c (UART), mpack.c + rpc.c (router protocol), view.c
 deploy/               build/deploy scripts (Windows → UNO Q over adb), systemd unit, board setup
 ```

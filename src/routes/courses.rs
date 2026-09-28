@@ -7,10 +7,15 @@ use crate::AppState;
 use crate::auth::RequireAdmin;
 use crate::db;
 use crate::error::{AppError, AppResult, is_unique_violation};
-use crate::models::{Course, CourseDetail, CreateCourse, UpdateCourse};
+use crate::models::{ChapterSummary, Course, CourseDetail, CourseSummary, CreateCourse, UpdateCourse};
 
-pub async fn list(State(state): State<AppState>) -> AppResult<Json<Vec<Course>>> {
-    Ok(Json(db::list_courses(&state.db).await?))
+pub async fn list(State(state): State<AppState>) -> AppResult<Json<Vec<CourseSummary>>> {
+    let rows = db::list_courses(&state.db).await?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| CourseSummary::new(r, &state.storage))
+            .collect(),
+    ))
 }
 
 pub async fn get(
@@ -20,7 +25,11 @@ pub async fn get(
     let course = db::course_by_slug(&state.db, &slug)
         .await?
         .ok_or(AppError::NotFound("course"))?;
-    let chapters = db::chapters_for_course(&state.db, &course.id).await?;
+    let chapters = db::chapters_for_course(&state.db, &course.id)
+        .await?
+        .into_iter()
+        .map(|r| ChapterSummary::new(r, &state.storage))
+        .collect();
     Ok(Json(CourseDetail { course, chapters }))
 }
 

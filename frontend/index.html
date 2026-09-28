@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#05070D" />
+    <meta name="description" content="Course notes shared by students, served from an Arduino UNO Q on your network." />
+    <title>notes</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script src="/theme-init.js"></script>
+    <style>
+      /* First-boot loader (§4.8): a 13x8 LED comet, pure CSS, shown only if the bundle is slow. */
+      #boot {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background: #05070d;
+        opacity: 0;
+        animation: boot-in 200ms 300ms forwards;
+      }
+      [data-theme="light"] #boot {
+        background: #f6f4ee;
+      }
+      #boot svg circle {
+        fill: #0d1628;
+      }
+      #boot svg .r {
+        animation: boot-led 840ms steps(1) infinite;
+      }
+      @keyframes boot-in {
+        to {
+          opacity: 1;
+        }
+      }
+      @keyframes boot-led {
+        0%, 8.3% { fill: #dcebff; }
+        8.4%, 16.6% { fill: #8cbeff; }
+        16.7%, 25% { fill: #4c9aff; }
+        25.1%, 33.3% { fill: #2e6cd8; }
+        33.4%, 100% { fill: #0d1628; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div id="boot" aria-hidden="true">
+        <svg width="143" height="88" viewBox="0 0 143 88">
+          <!-- the firmware's 12 "starting" ring points, lit in turn -->
+          <circle class="r" cx="71.5" cy="5.5" r="4" style="animation-delay:0ms" />
+          <circle class="r" cx="93.5" cy="16.5" r="4" style="animation-delay:70ms" />
+          <circle class="r" cx="104.5" cy="27.5" r="4" style="animation-delay:140ms" />
+          <circle class="r" cx="104.5" cy="49.5" r="4" style="animation-delay:210ms" />
+          <circle class="r" cx="104.5" cy="60.5" r="4" style="animation-delay:280ms" />
+          <circle class="r" cx="93.5" cy="71.5" r="4" style="animation-delay:350ms" />
+          <circle class="r" cx="71.5" cy="82.5" r="4" style="animation-delay:420ms" />
+          <circle class="r" cx="49.5" cy="71.5" r="4" style="animation-delay:490ms" />
+          <circle class="r" cx="38.5" cy="60.5" r="4" style="animation-delay:560ms" />
+          <circle class="r" cx="38.5" cy="49.5" r="4" style="animation-delay:630ms" />
+          <circle class="r" cx="38.5" cy="27.5" r="4" style="animation-delay:700ms" />
+          <circle class="r" cx="49.5" cy="16.5" r="4" style="animation-delay:770ms" />
+        </svg>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
