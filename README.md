@@ -1,6 +1,6 @@
 # notes-server
 
-A backend for a course-notes website, organised as **Course → Chapter → Note → images**.
+A backend for a course-notes website, organised as **Course → Chapter → Note → images**. It runs on an **Arduino UNO Q (4 GB)**, and the board's **LED matrix shows the server's status**.
 
 - **Normal users** don't need an account. They can browse everything and upload notes (a title, optional text and 1–10 images).
 - **The admin** manages courses and chapters, and is the only one who can edit or delete anything.
@@ -9,12 +9,21 @@ When a note is uploaded, the server:
 
 1. checks each image's format from its actual bytes;
 2. applies EXIF rotation and strips all metadata, including phone GPS;
-3. resizes the image to fit within **1600px** and makes a **300px thumbnail** (pure Rust, SIMD: NEON on the Pi, AVX2 on x86);
+3. resizes the image to fit within **1600px** and makes a **300px thumbnail** (pure Rust, SIMD: NEON on the board, AVX2 on x86);
 4. saves both as JPEG files on disk;
 5. records their locations in SQLite;
 6. serves them over **HTTPS** with permanent caching.
 
-The code is built on a Windows laptop and deployed to a **Raspberry Pi 5**.
+The UNO Q has two processors, and this project uses both:
+
+| Chip | Runs | Code |
+|---|---|---|
+| Qualcomm QRB2210 (4× Cortex-A53, Debian) | `notes-server` (Rust) | `src/` |
+| STM32U585 (Cortex-M33) | `notes-matrix`, native **Zephyr** firmware that drives the 8×13 LED matrix | `mcu/notes-matrix/` |
+
+The two chips are separate, with no shared memory; they're connected by a UART (`/dev/ttyHS1` ↔ the STM32's LPUART1). Arduino's **`arduino-router`** owns that UART on the Linux side and routes **MessagePack-RPC** between its clients. The Zephyr firmware registers methods with the router, and the server calls them through the router's Unix socket. Both ends implement MessagePack-RPC directly, without the Arduino Bridge library.
+
+The router keeps running, so Arduino App Lab and the cloud connector keep working. Everything is built on a Windows laptop and deployed over USB with adb.
 
 ## API
 
@@ -71,9 +80,51 @@ An HTML upload form only needs this:
 </form>
 ```
 
+## LED matrix status
+
+| Matrix shows | Meaning |
+|---|---|
+| A dim dot sweeping along the bottom row | The firmware is running and waiting to hear from the server |
+| A spinning comet | The server is starting |
+| A bar graph plus a blinking top-right pixel | Running. Each column is one second of the last 13 seconds; the bar height is requests on a log scale; bright tops mean images were uploaded; the pixel is the heartbeat |
+| The bar graph with the top row blinking | Warning: the disk is nearly full, so uploads are refused (scrolls `DISK LOW`) |
+| A solid X | Error: the database isn't answering (scrolls `DB ERROR`), or the server failed to start (`START FAILED`) |
+| A **blinking X** | **Server down**: no status for 5 seconds, so it crashed or hung. This is detected by the STM32 itself |
+| A dim dash | The server was stopped cleanly |
+| An arrow flying up | An image was just uploaded |
+| Scrolling `IP 192.168.x.y` | The board's address, shown at start and whenever it changes (`NO NETWORK` if there's none) |
+
+The firmware registers these methods with `arduino-router`, and the server calls them:
+
+| Method | Kind | Params |
+|---|---|---|
+| `notes/status` | notification, every second | `[state, requests, uploads]`, where the state is `"B"`/`"O"`/`"W"`/`"E"`/`"D"` |
+| `notes/text` | notification | `[text]`, scrolled once |
+| `notes/hello` | request | `[]` → `"notes-matrix 3"`; the server logs `LED matrix firmware answered` |
+
+The firmware re-registers every 10 s whenever no status is arriving, so it recovers if the router restarts.
+
+The firmware:
+
+- **Charlieplex driver:** the 104 LEDs sit on PF0–PF10. A TIM17 interrupt every 10 µs lights one LED at a time, giving about a 960 Hz refresh with 8 brightness levels. The pin table is Arduino's (Apache-2.0).
+- **UART:** interrupt-driven into a ring buffer.
+- **MessagePack:** `mpack.c` is a small hand-written reader and writer. It resynchronises after garbage bytes.
+- **RPC:** `rpc.c` handles the requests and notifications.
+- **Rendering:** `view.c` draws the views.
+
+`mpack.c`, `rpc.c` and `view.c` are plain C with no Zephyr APIs. `tests/host_test.c` exercises them on the PC, feeding in the exact bytes the server sends:
+
+```
+zig cc -std=c11 -Wall -Wextra -Isrc tests/host_test.c src/mpack.c src/rpc.c src/view.c -o host_test && ./host_test
+```
+
+It builds against upstream Zephyr v4.4.2 for board `arduino_uno_q`: 29 KB of flash and 7 KB of RAM.
+
+The Zephyr firmware replaces Arduino's sketch loader on the STM32, so Arduino sketches don't run while it's installed. The router and App Lab's other features keep working. See "Going back to Arduino App Lab" below to undo it.
+
 ## Admin TUI (`notes-admin`)
 
-`notes-admin` is a terminal app for managing everything on the server: courses, chapters, notes and images. It runs on your laptop and talks to the server's HTTPS API with the admin token, so you never need to SSH into the Pi to manage content.
+`notes-admin` is a terminal app for managing everything on the server: courses, chapters, notes and images. It runs on your laptop and talks to the server's HTTPS API with the admin token, so you never need a shell on the board to manage content.
 
 ```
  notes-admin  https://notes.example.com
@@ -97,8 +148,8 @@ cargo run --release --bin notes-admin                          # asks for the UR
 $env:NOTES_URL = "https://notes.example.com"
 $env:NOTES_ADMIN_TOKEN = "<ADMIN_TOKEN from /etc/notes-server/env>"
 cargo run --release --bin notes-admin
-# a Pi on your LAN with a self-signed certificate:
-cargo run --release --bin notes-admin -- --url https://notes-pi.local --ca-cert .\cert.pem
+# the UNO Q with its self-signed certificate (see "Useful commands" below for getting cert.pem):
+cargo run --release --bin notes-admin -- --url https://<hostname>.local --ca-cert .\unoq-cert.pem
 ```
 
 After a release build, the binary is `target\release\notes-admin.exe`; you can copy it anywhere. The token is never taken as a command-line argument, so it doesn't end up in your shell history.
@@ -121,84 +172,100 @@ Image fields accept file paths or a whole folder (every JPEG, PNG, WebP or GIF d
 ## Laptop setup (Windows, one time)
 
 ```powershell
-# Rust is already installed. For cross-compiling to the Pi:
+# Server cross-compile (Rust is already installed):
 rustup target add aarch64-unknown-linux-gnu
 winget install zig.zig
 cargo install --locked cargo-zigbuild
+
+# Zephyr workspace for the STM32 firmware (~1.5 GB, lives in mcu\, git-ignored):
+cd mcu
+python -m venv .venv
+.venv\Scripts\pip install west
+.venv\Scripts\west init -l notes-matrix           # manifest: mcu\notes-matrix\west.yml (Zephyr v4.4.2 + STM32 HAL only)
+.venv\Scripts\west update --narrow -o=--depth=1
+.venv\Scripts\pip install -r zephyr\scripts\requirements-base.txt
+cd zephyr; ..\.venv\Scripts\west sdk install -t arm-zephyr-eabi; cd ..\..
 ```
 
-The builds use zig for one job: it's the C compiler and linker for the little C code in the dependencies (bundled SQLite and `ring`'s crypto). Everything else is Rust, and zig isn't part of the finished binary.
+You also need **adb**, which comes with Android platform-tools or Arduino App Lab. The deploy script finds either one.
+
+The server build uses zig for one job: it's the C compiler and linker for the little C code in the dependencies (bundled SQLite and `ring`'s crypto). Everything else is Rust, and zig isn't part of the finished binary.
 
 ## Develop and test on the laptop
 
 ```powershell
-cargo test                                         # unit + API + real-HTTPS tests
+cargo test                                         # unit + API + real-HTTPS + TUI tests
 cargo run --release --example bench_resize         # image pipeline timings
+.\deploy\build-unoq.ps1 -FirmwareOnly              # build just the Zephyr firmware
 ```
 
-To run the server locally, first put a certificate in `certs/`. You can use `mkcert -cert-file certs/cert.pem -key-file certs/key.pem localhost 127.0.0.1`, or the `openssl` command below. Then:
+To run the server locally, first put a certificate in `certs/`. You can use `mkcert -cert-file certs/cert.pem -key-file certs/key.pem localhost 127.0.0.1`, or `openssl`. Then:
 
 ```powershell
 $env:ADMIN_TOKEN = "dev-token-at-least-32-characters-long"
 cargo run --release           # https://localhost:3443 ; data in .\data, images in .\uploads
 ```
 
-Try it with curl (use `curl.exe` in PowerShell, since plain `curl` there is an alias for something else):
+On Windows, `MATRIX_ROUTER` can point at a plain file, for example `$env:MATRIX_ROUTER = "matrix.bin"`. The server then appends the MessagePack-RPC stream to that file instead of a socket, which is handy for inspecting it.
 
-```powershell
-$h = "Authorization: Bearer $env:ADMIN_TOKEN"
-curl.exe -k -H $h -H "Content-Type: application/json" -d '{\"slug\":\"math-101\",\"name\":\"Math 101\"}' https://localhost:3443/api/courses
-curl.exe -k -H $h -H "Content-Type: application/json" -d '{\"title\":\"Limits\"}' https://localhost:3443/api/courses/math-101/chapters
-curl.exe -k -F "title=Lecture 1" -F "images=@C:\path\photo.jpg" https://localhost:3443/api/chapters/<chapter id>/notes
-```
+## Deploy to the Arduino UNO Q
 
-## Deploy to the Raspberry Pi 5
-
-The Pi needs **64-bit Raspberry Pi OS** (Bookworm or newer) with SSH enabled. I recommend putting `/var/lib/notes-server` on a USB SSD or an NVMe HAT, because SD cards are slow and wear out.
+Plug the board into the laptop over USB-C.
 
 **First time:**
 
 ```powershell
-.\deploy\deploy.ps1 -PiHost pi@notes-pi.local -Setup
+.\deploy\deploy-unoq.ps1 -Setup
 ```
 
-This:
+This does the following:
 
-1. cross-compiles the server;
-2. creates a `notes` service user;
-3. creates `/opt/notes-server`, `/var/lib/notes-server` (the database and uploads) and `/etc/notes-server/env` (the config, with a random `ADMIN_TOKEN` generated for you);
-4. installs the systemd unit.
-
-After it finishes:
-
-1. Edit the config on the Pi: `sudo nano /etc/notes-server/env`. Set `PUBLIC_BASE_URL`, and `CORS_ORIGIN` if the website is served from a different domain.
-2. Install a certificate (see below).
-3. Deploy again (next section).
+1. Builds the server and the firmware.
+2. Runs `deploy/setup-unoq.sh` on the board with sudo. It asks for the board's password in your terminal, and:
+   - creates a `notes` service user (the router socket is world-writable, so it needs no extra groups);
+   - creates `/opt/notes-server`, `/var/lib/notes-server` (the database and uploads, on the eMMC) and `/etc/notes-server/env` (with a random `ADMIN_TOKEN`);
+   - makes a self-signed certificate for `https://<hostname>.local`;
+   - installs the systemd unit;
+   - adds a sudoers rule so later deploys can restart just this service without a password.
+3. Flashes the Zephyr firmware onto the STM32 over the board's own SWD lines, using Arduino's `remoteocd` and OpenOCD on the board.
+4. Installs and starts the server.
 
 **Every update after that:**
 
 ```powershell
-.\deploy\deploy.ps1 -PiHost pi@notes-pi.local             # build, copy, restart, check it's running
-.\deploy\deploy.ps1 -PiHost pi@notes-pi.local -WithBench  # also copy bench_resize to ~ on the Pi
+.\deploy\deploy-unoq.ps1                # build, flash firmware, install, restart, check it's running
+.\deploy\deploy-unoq.ps1 -NoFirmware    # server only
 ```
 
-The build output is `target\aarch64-unknown-linux-gnu\release\notes-server`, one file of about 7 MB. It's linked against glibc 2.36, so it doesn't matter which newer Pi OS release is installed.
+Useful commands:
 
-On the Pi:
+| Task | Command |
+|---|---|
+| Watch the logs | `adb shell journalctl -u notes-server -f` |
+| See the admin token | `adb shell -t sudo grep ADMIN_TOKEN /etc/notes-server/env` |
+| Reach the server over USB, without a network | `adb forward tcp:8443 tcp:443`, then open `https://localhost:8443` |
+| Put the board on Wi-Fi | `adb shell -t sudo nmcli dev wifi connect "<SSID>" password "<password>"` (the matrix then scrolls its IP) |
+| Copy the self-signed cert for `notes-admin --ca-cert` | `adb shell cat /etc/notes-server/certs/cert.pem > unoq-cert.pem` (only after `adb shell -t sudo chmod 644 /etc/notes-server/certs/cert.pem`; the certificate is public, the key isn't) |
 
-- Logs: `journalctl -u notes-server -f`
-- Benchmark: `~/bench_resize` (or `~/bench_resize photo.jpg`)
-- Admin token: `sudo grep ADMIN_TOKEN /etc/notes-server/env`
+**Performance on the board:** a 3840×2400 photo takes about 0.7 s to decode, resize and encode on one A53 core, and two images are processed in parallel.
+
+### Going back to Arduino App Lab
+
+```powershell
+.\deploy\deploy-unoq.ps1 -RestoreArduinoLoader     # puts Arduino's sketch loader back on the STM32
+```
+
+Nothing else needs undoing, because the router was never touched. The server keeps running; the matrix just stops showing its status until `notes-matrix` is flashed again.
 
 ### Certificates
 
-The server reads `/etc/notes-server/certs/cert.pem` (the full chain) and `key.pem`. It re-reads them every 12 hours, so renewals are picked up without a restart.
+The server reads `/etc/notes-server/certs/cert.pem` (the full chain) and `key.pem`. It re-reads them every 12 hours, so renewals are picked up without a restart. Setup creates a self-signed certificate. Browsers will warn about it; `notes-admin` can trust it with `--ca-cert`.
 
-**Public domain (Let's Encrypt).** Point the domain at your router and forward ports 80 and 443 to the Pi. Then on the Pi:
+**Public domain (Let's Encrypt).** Point the domain at your router and forward ports 80 and 443 to the board. Then on the board:
 
 ```bash
 sudo apt install certbot
-sudo cp /path/to/deploy/certbot-deploy-hook.sh /etc/letsencrypt/renewal-hooks/deploy/notes-server.sh  # setup-pi.sh already does this if certbot is installed
+sudo cp /path/to/deploy/certbot-deploy-hook.sh /etc/letsencrypt/renewal-hooks/deploy/notes-server.sh
 # First certificate: the server can't start without one, so issue it with certbot's own listener.
 sudo systemctl stop notes-server
 sudo certbot certonly --standalone -d notes.example.com
@@ -209,16 +276,7 @@ sudo certbot certonly --webroot -w /var/lib/notes-server/acme -d notes.example.c
 sudo certbot renew --dry-run
 ```
 
-**LAN only (self-signed):**
-
-```bash
-sudo openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 825 \
-  -subj "/CN=notes-pi.local" -addext "subjectAltName=DNS:notes-pi.local,IP:192.168.1.50" \
-  -keyout /etc/notes-server/certs/key.pem -out /etc/notes-server/certs/cert.pem
-sudo chgrp notes /etc/notes-server/certs/*.pem && sudo chmod 640 /etc/notes-server/certs/*.pem
-```
-
-Browsers will warn about a self-signed certificate. `mkcert` avoids that on devices where you install its root CA.
+Then set `PUBLIC_BASE_URL=https://notes.example.com` in `/etc/notes-server/env`.
 
 ### Backups
 
@@ -231,35 +289,38 @@ rsync -a /var/lib/notes-server/uploads/ /backup/uploads/
 
 ## Configuration
 
-All settings are environment variables. On the Pi they live in `/etc/notes-server/env`; see `deploy/notes-server.env.example`.
+All settings are environment variables. On the board they live in `/etc/notes-server/env`; see `deploy/notes-server.env.example`.
 
 | Variable | Default | |
 |---|---|---|
 | `ADMIN_TOKEN` | **required** | At least 32 characters |
 | `PUBLIC_BASE_URL` | `https://localhost:3443` | Used to build image URLs and the HTTP→HTTPS redirect |
-| `BIND_ADDR` | `0.0.0.0:3443` | Use `0.0.0.0:443` on the Pi |
+| `BIND_ADDR` | `0.0.0.0:3443` | `0.0.0.0:443` on the board |
 | `TLS_CERT_PATH` / `TLS_KEY_PATH` | `./certs/cert.pem` / `./certs/key.pem` | |
 | `HTTP_REDIRECT_ADDR` | unset | e.g. `0.0.0.0:80`: redirects plain HTTP to HTTPS |
 | `ACME_WEBROOT` | unset | Answers certbot `--webroot` challenges on the redirect port |
 | `DATABASE_URL` | `sqlite://data/notes.db?mode=rwc` | |
 | `UPLOAD_DIR` | `./uploads` | |
+| `MATRIX_ROUTER` | unset (no matrix) | arduino-router's socket: `/var/run/arduino-router.sock` on the UNO Q |
 | `CORS_ORIGIN` | unset (any origin) | Set to the website's origin in production |
 | `IMAGE_WORKERS` | `2` | How many images are processed at once, across all requests |
-| `MIN_FREE_DISK_MB` | `1024` | Uploads are refused when free space drops below this |
+| `MIN_FREE_DISK_MB` | `1024` | Uploads are refused (and the matrix warns) below this |
 | `UPLOAD_BURST` / `UPLOAD_REFILL_SECS` | `5` / `12` | Per-IP limit on public uploads |
 | `RUST_LOG` | `notes_server=info,tower_http=info` | Use `notes_server=debug` to log how long each image took |
 
 ## Layout
 
 ```
-src/imaging.rs   decode → orient → flatten → resize (fast_image_resize) → encode (jpeg-encoder)
-src/routes/      HTTP handlers: courses, chapters, notes/uploads
-src/db.rs        all SQL (sqlx + SQLite, WAL mode); schema in migrations/
-src/storage.rs   files on disk: notes/{note_id}/{image_id}.jpg + _thumb.jpg
-src/auth.rs      admin bearer-token check (constant-time)
-src/tls.rs       rustls (ring), certificate reload, HTTP→HTTPS redirect + ACME webroot
+src/imaging.rs        decode → orient → flatten → resize (fast_image_resize) → encode (jpeg-encoder)
+src/matrix.rs         LED matrix link: MessagePack-RPC client for arduino-router, 1 Hz status reporter
+src/routes/           HTTP handlers: courses, chapters, notes/uploads
+src/db.rs             all SQL (sqlx + SQLite, WAL mode); schema in migrations/
+src/storage.rs        files on disk: notes/{note_id}/{image_id}.jpg + _thumb.jpg
+src/auth.rs           admin bearer-token check (constant-time)
+src/tls.rs            rustls (ring), certificate reload, HTTP→HTTPS redirect + ACME webroot
 src/bin/notes-admin/  admin TUI (ratatui): api.rs client, app.rs state/actions, ui.rs rendering
-deploy/          build/deploy scripts for Windows → Pi, systemd unit, Pi setup
+mcu/notes-matrix/     Zephyr firmware: matrix.c (charlieplex), link.c (UART), mpack.c + rpc.c (router protocol), view.c
+deploy/               build/deploy scripts (Windows → UNO Q over adb), systemd unit, board setup
 ```
 
 Uploads are ordered so the database and disk can't disagree:

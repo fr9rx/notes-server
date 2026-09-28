@@ -1,0 +1,18 @@
+# West manifest for the notes-matrix firmware (STM32U585 on the Arduino UNO Q).
+# Pulls Zephyr plus only the modules this board needs. The workspace is `mcu/`:
+#   cd mcu && west init -l notes-matrix && west update --narrow -o=--depth=1
+manifest:
+  self:
+    path: notes-matrix
+  remotes:
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+  projects:
+    - name: zephyr
+      remote: zephyrproject-rtos
+      revision: v4.4.2
+      import:
+        name-allowlist:
+          - cmsis
+          - cmsis_6
+          - hal_stm32

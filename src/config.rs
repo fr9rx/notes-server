@@ -44,6 +44,8 @@ pub struct Config {
     pub acme_webroot: Option<PathBuf>,
     pub database_url: String,
     pub upload_dir: PathBuf,
+    /// arduino-router's socket, through which the LED matrix firmware is reached.
+    pub matrix_router: Option<PathBuf>,
     pub app: AppSettings,
 }
 
@@ -92,6 +94,10 @@ impl Config {
                 .map(PathBuf::from),
             database_url: var_or("DATABASE_URL", "sqlite://data/notes.db?mode=rwc"),
             upload_dir: var_or("UPLOAD_DIR", "./uploads").into(),
+            matrix_router: env::var("MATRIX_ROUTER")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .map(PathBuf::from),
             app,
         })
     }

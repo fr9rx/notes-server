@@ -5,3 +5,10 @@
 *.db
 *.db-shm
 *.db-wal
+
+# Zephyr workspace for mcu/notes-matrix (west init -l); fetched, not committed
+/mcu/.west
+/mcu/.venv
+/mcu/zephyr
+/mcu/modules
+/mcu/build

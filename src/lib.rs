@@ -3,6 +3,7 @@ pub mod config;
 pub mod db;
 pub mod error;
 pub mod imaging;
+pub mod matrix;
 pub mod models;
 pub mod routes;
 pub mod storage;
@@ -20,6 +21,7 @@ use sqlx::SqlitePool;
 use tokio::sync::Semaphore;
 
 use crate::config::AppSettings;
+use crate::matrix::Metrics;
 use crate::storage::LocalStorage;
 
 #[derive(Clone)]
@@ -29,6 +31,8 @@ pub struct AppState {
     pub settings: Arc<AppSettings>,
     /// Bounds concurrent image processing across all requests (CPU + RAM).
     pub image_permits: Arc<Semaphore>,
+    /// Request/upload counters shown on the LED matrix.
+    pub metrics: Arc<Metrics>,
 }
 
 impl AppState {
@@ -40,6 +44,7 @@ impl AppState {
             db,
             storage: LocalStorage::new(upload_dir, &settings.public_base_url),
             image_permits: Arc::new(Semaphore::new(settings.image_workers.max(1))),
+            metrics: Arc::default(),
             settings: Arc::new(settings),
         })
     }

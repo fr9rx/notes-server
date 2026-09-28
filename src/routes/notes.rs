@@ -65,6 +65,7 @@ pub async fn create(
     match saved {
         Ok((note, images)) => {
             tracing::info!(note = %note.id, chapter = %chapter_id, images = images.len(), "note uploaded");
+            state.metrics.record_uploads(images.len());
             Ok((StatusCode::CREATED, Json(NoteDto::new(note, images, &state.storage))))
         }
         Err(e) => {
@@ -170,10 +171,13 @@ pub async fn add_images(
     .await;
 
     match saved {
-        Ok(images) => Ok((
+        Ok(images) => {
+            state.metrics.record_uploads(images.len());
+            Ok((
             StatusCode::CREATED,
             Json(images.into_iter().map(|r| ImageDto::new(r, &state.storage)).collect()),
-        )),
+        ))
+        }
         Err(e) => {
             state.storage.delete_keys_logged(&written).await;
             Err(if is_fk_violation(&e) { AppError::NotFound("note") } else { e.into() })

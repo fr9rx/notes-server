@@ -1,7 +1,8 @@
 [Unit]
-Description=Course notes server
-Wants=network-online.target
-After=network-online.target
+Description=Course notes server (Arduino UNO Q)
+# The LED matrix firmware is reached through arduino-router's socket.
+Wants=network-online.target arduino-router.service
+After=network-online.target arduino-router.service
 
 [Service]
 Type=simple
@@ -19,7 +20,8 @@ TimeoutStopSec=40
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 
-# Hardening: read-only system, writable data dir only.
+# Hardening: read-only system, writable data dir, no devices. (Connecting to the
+# router's Unix socket still works on the read-only /run.)
 NoNewPrivileges=true
 ProtectSystem=strict
 ReadWritePaths=/var/lib/notes-server
@@ -33,9 +35,8 @@ RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 RestrictNamespaces=true
 LockPersonality=true
 
-# Keep a misbehaving process from starving the Pi. Normal peak with
-# IMAGE_WORKERS=2 is well under this.
-MemoryMax=1G
+# 4 GB board; normal peak with IMAGE_WORKERS=2 is far below this.
+MemoryMax=1500M
 LimitNOFILE=65536
 
 [Install]

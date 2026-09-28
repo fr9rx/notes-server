@@ -101,10 +101,15 @@ pub fn router(state: AppState) -> Router {
         ))
         .service(ServeDir::new(state.storage.root()));
 
+    let metrics = state.metrics.clone();
     Router::new()
         .merge(api)
         .route("/health", get(|| async { "ok" }))
         .nest_service("/files", files)
+        .layer(axum::middleware::from_fn(move |req, next: axum::middleware::Next| {
+            metrics.record_request();
+            next.run(req)
+        }))
         .layer(TraceLayer::new_for_http())
         .layer(cors(settings.cors_origin.as_deref()))
         .layer(SetResponseHeaderLayer::if_not_present(

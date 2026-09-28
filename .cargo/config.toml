@@ -1,4 +1,4 @@
-# Raspberry Pi 5 = Cortex-A76. Lets the compiler use its extensions (dotprod,
-# fp16, ...) on top of baseline NEON. Only affects the Pi build, not the laptop.
+# Arduino UNO Q = Qualcomm QRB2210, 4x Cortex-A53. Tunes the aarch64 build for
+# it (baseline NEON + A53 scheduling). Only affects the board build.
 [target.aarch64-unknown-linux-gnu]
-rustflags = ["-C", "target-cpu=cortex-a76"]
+rustflags = ["-C", "target-cpu=cortex-a53"]

@@ -1,0 +1,22 @@
+/*
+ * notes-matrix devicetree additions for the arduino_uno_q board.
+ *
+ * - TIM17 as a counter: its top-value interrupt scans the LED matrix
+ *   (same timer and prescaler as Arduino's loader).
+ * - GPIOF: the 11 charlieplexed LED matrix lines PF0..PF10.
+ * - LPUART1 (PG7 TX / PG8 RX, 115200 8N1, no flow control) is already enabled
+ *   by the board; it is the link Linux sees as /dev/ttyHS1.
+ */
+
+&timers17 {
+	status = "okay";
+	st,prescaler = <4>;
+
+	counter_matrix: counter {
+		status = "okay";
+	};
+};
+
+&gpiof {
+	status = "okay";
+};
