@@ -32,10 +32,9 @@ The site is a React app in `frontend/`. It's compiled into the server binary, so
 The design spec is `frontend/DESIGN.md` ("Phosphor & Paper"). The site grows out of the board's blue 8×13 LED matrix:
 - **Home:**
   - a canvas LED field whose clouds drift and follow the cursor, and ripple where you tap;
-  - a fanned stack of the newest course photos that spreads on hover;
   - a word-by-word headline reveal;
   - counters with rolling digits;
-  - course cards with an LED-halftone cover that reveals the real photo on hover, 3D tilt, a spotlight border and an LED monogram.
+  - text course cards with 3D tilt and a spotlight border.
 - **Course:** the card morphs into the page header, and a dotted "signal" rail lights up as you scroll down the chapters.
 - **Chapter:** a masonry grid laid out from the known photo sizes (no layout shift), paging with an LED loader, newest/oldest sorting, and drag-and-drop anywhere on the page.
 - **Note:** the cover morphs into a lightbox with swipe, swipe-down to dismiss, pinch, double-tap and ctrl+wheel zoom, keyboard shortcuts, a thumbnail strip, blur-up to the full photo, and download or share.
@@ -67,7 +66,7 @@ The server returns JSON everywhere. Errors look like `{"error": "..."}`. Admin r
 
 | Method & path | Who | |
 |---|---|---|
-| `GET /api/courses` | public | List of courses, each with chapter/note/photo counts and a cover thumbnail |
+| `GET /api/courses` | public | List of courses, each with chapter/note/photo counts and its newest photo's thumbnail (`cover_thumb_url`) |
 | `GET /api/courses/{slug}` | public | The course with its chapters, in order |
 | `POST /api/courses` | admin | `{"slug":"math-101","name":"Math 101","description":"..."}` |
 | `PATCH /api/courses/{slug}` | admin | Any of `slug`, `name`, `description` |
