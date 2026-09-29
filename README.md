@@ -72,6 +72,8 @@ The server returns JSON everywhere. Errors look like `{"error": "..."}`. Admin r
 | `POST /api/courses` | admin | `{"slug":"math-101","name":"Math 101","description":"..."}` |
 | `PATCH /api/courses/{slug}` | admin | Any of `slug`, `name`, `description` |
 | `DELETE /api/courses/{slug}` | admin | Deletes the course's chapters, notes and files too |
+| `PUT /api/courses/{slug}/cover` | admin | multipart with one `image`: sets the course's cover photo, resized like note photos. Without one, the newest note photo is the cover |
+| `DELETE /api/courses/{slug}/cover` | admin | Removes the cover photo (back to the newest note photo) |
 | `POST /api/courses/{slug}/chapters` | admin | `{"title":"Limits","position":0}`; with no `position`, the chapter goes at the end |
 | `GET /api/chapters/{id}?limit=50&offset=0&order=asc` | public | The chapter plus a page of its notes with their images; `order=desc` for newest first |
 | `PATCH /api/chapters/{id}` | admin | `title`, `position` |
@@ -201,6 +203,7 @@ After a release build, the binary is `target\release\notes-admin.exe`; you can c
 | `Shift+↑/↓` or `K/J` | Reorder chapters |
 | `m` | Move the selected note to another chapter, in any course |
 | `i` | Add images to the selected note |
+| `c` / `C` | Set / remove the selected course's cover photo (`o` in Courses opens it) |
 | `o` / `Enter` on an image | Open the image in your browser |
 | `r` / `F5` | Reload from the server; `?` shows help; `q` quits |
 

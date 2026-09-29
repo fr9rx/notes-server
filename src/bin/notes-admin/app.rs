@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use notes_server::models::{
-    Chapter, Course, CreateChapter, CreateCourse, ImageDto, NoteDto, UpdateChapter, UpdateCourse,
-    UpdateNote,
+    Chapter, Course, CourseSummary, CreateChapter, CreateCourse, ImageDto, NoteDto, UpdateChapter,
+    UpdateCourse, UpdateNote,
 };
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
@@ -46,6 +46,7 @@ pub enum StatusKind {
 pub enum FormAction {
     NewCourse,
     EditCourse { slug: String },
+    SetCover { slug: String },
     NewChapter { course_slug: String },
     EditChapter { id: String },
     NewNote { chapter_id: String },
@@ -56,6 +57,7 @@ pub enum FormAction {
 #[derive(Debug, Clone)]
 pub enum DeleteTarget {
     Course { id: String, slug: String },
+    Cover { id: String, slug: String },
     Chapter { id: String },
     Note { id: String },
     Image { note_id: String, image_id: String },
@@ -84,7 +86,7 @@ pub struct App {
     insecure: bool,
     pub login: Form,
 
-    pub courses: Vec<Course>,
+    pub courses: Vec<CourseSummary>,
     pub course_state: ListState,
     pub chapters: Vec<Chapter>,
     pub chapter_state: ListState,
@@ -178,6 +180,10 @@ impl App {
     // ---- Selection helpers ---------------------------------------------------
 
     pub fn selected_course(&self) -> Option<&Course> {
+        self.selected_course_summary().map(|c| &c.course)
+    }
+
+    pub fn selected_course_summary(&self) -> Option<&CourseSummary> {
         self.course_state.selected().and_then(|i| self.courses.get(i))
     }
 
@@ -236,7 +242,7 @@ impl App {
             Ok(courses) => self.courses = courses,
             Err(e) => return self.fail(e),
         }
-        select_by(&mut self.course_state, &self.courses, course.as_deref(), |c| &c.id);
+        select_by(&mut self.course_state, &self.courses, course.as_deref(), |c| &c.course.id);
         self.show_chapters(chapter);
         // show_chapters loaded the notes; restore the note selection by id.
         select_by(&mut self.note_state, &self.notes, note.as_deref(), |n| &n.note.id);
@@ -251,7 +257,7 @@ impl App {
         match self.rt.block_on(api.courses()) {
             Ok(courses) => {
                 self.courses = courses;
-                select_by(&mut self.course_state, &self.courses, keep.as_deref(), |c| &c.id);
+                select_by(&mut self.course_state, &self.courses, keep.as_deref(), |c| &c.course.id);
                 self.show_chapters(None);
             }
             Err(e) => self.fail(e),
@@ -398,6 +404,9 @@ impl App {
             KeyCode::Down if shift => self.reorder_chapter(1),
             KeyCode::Char('a' | 'n') => self.open_add(),
             KeyCode::Char('i') => self.open_add_images(),
+            KeyCode::Char('c') => self.open_set_cover(),
+            KeyCode::Char('C') => self.open_remove_cover(),
+            KeyCode::Char('o') if self.focus == Focus::Courses => self.open_cover(),
             KeyCode::Char('e') => self.open_edit(),
             KeyCode::Enter if self.focus == Focus::Images => self.open_image(),
             KeyCode::Enter => self.open_edit(),
@@ -480,6 +489,46 @@ impl App {
             form: Form::new(vec![images_field()]),
             action: FormAction::AddImages { note_id: note.note.id.clone() },
         });
+    }
+
+    fn open_set_cover(&mut self) {
+        let Some(c) = self.selected_course() else {
+            return self.fail("Select a course first");
+        };
+        self.modal = Some(Modal::Form {
+            title: format!("Cover photo for {}", c.name),
+            form: Form::new(vec![
+                Field::new("Photo", FieldKind::Line, "")
+                    .hint("one image file (drag & drop works); replaces the current cover"),
+            ]),
+            action: FormAction::SetCover { slug: c.slug.clone() },
+        });
+    }
+
+    fn open_remove_cover(&mut self) {
+        let Some(c) = self.selected_course_summary() else {
+            return self.fail("Select a course first");
+        };
+        if !c.custom_cover {
+            return self.info("This course has no cover photo set (it shows its newest photo)");
+        }
+        self.modal = Some(Modal::Confirm {
+            message: format!(
+                "Remove the cover photo of \"{}\"?\n\nThe course will show its newest note photo instead.",
+                c.course.name
+            ),
+            action: DeleteTarget::Cover { id: c.course.id.clone(), slug: c.course.slug.clone() },
+        });
+    }
+
+    fn open_cover(&mut self) {
+        match self.selected_course_summary().and_then(|c| c.cover_url.clone()) {
+            Some(url) => match open_in_browser(&url) {
+                Ok(()) => self.info(format!("Opened {url}")),
+                Err(e) => self.fail(format!("could not open browser: {e}")),
+            },
+            None => self.fail("This course has no photos yet (press c to set a cover)"),
+        }
     }
 
     fn open_edit(&mut self) {
@@ -570,7 +619,7 @@ impl App {
         self.defer("Loading chapters…", move |app| {
             let api = app.api();
             let mut items = Vec::new();
-            for course in app.courses.clone() {
+            for course in app.courses.iter().map(|c| c.course.clone()).collect::<Vec<_>>() {
                 if !app.chapters_cache.contains_key(&course.id) {
                     match app.rt.block_on(api.course(&course.slug)) {
                         Ok(d) => {
@@ -642,6 +691,15 @@ impl App {
                 self.load_courses(Some(course.id));
                 self.info(format!("Saved course {}", course.name));
             }
+            FormAction::SetCover { slug } => {
+                let files = parse_image_paths(form.value(0))?;
+                let [file] = files.as_slice() else {
+                    return Err("enter the path of one image file".into());
+                };
+                let course = rt.block_on(api.set_course_cover(slug, file)).map_err(|e| e.to_string())?;
+                self.load_courses(Some(course.course.id));
+                self.info(format!("Set the cover photo of {}", course.course.name));
+            }
             FormAction::NewChapter { course_slug } => {
                 let req = CreateChapter { title: text(0), position: parse_position(&text(1))? };
                 let chapter = rt
@@ -698,6 +756,7 @@ impl App {
         let api = self.api();
         let result = match &action {
             DeleteTarget::Course { slug, .. } => self.rt.block_on(api.delete_course(slug)),
+            DeleteTarget::Cover { slug, .. } => self.rt.block_on(api.delete_course_cover(slug)),
             DeleteTarget::Chapter { id } => self.rt.block_on(api.delete_chapter(id)),
             DeleteTarget::Note { id } => self.rt.block_on(api.delete_note(id)),
             DeleteTarget::Image { note_id, image_id } => {
@@ -712,6 +771,10 @@ impl App {
                 self.chapters_cache.remove(&id);
                 self.load_courses(None);
                 self.info("Course deleted");
+            }
+            DeleteTarget::Cover { id, .. } => {
+                self.load_courses(Some(id));
+                self.info("Cover photo removed");
             }
             DeleteTarget::Chapter { id } => {
                 self.notes_cache.remove(&id);

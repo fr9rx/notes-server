@@ -476,3 +476,84 @@ async fn chapter_notes_newest_first() {
     assert_eq!(titles(t.get(&format!("/api/chapters/{chapter_id}?order=asc")).await.json()), ["n0", "n1", "n2"]);
     assert_eq!(t.get(&format!("/api/chapters/{chapter_id}?order=sideways")).await.status, StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn course_cover_photo() {
+    let t = TestApp::new().await;
+    let (slug, chapter_id) = t.course_with_chapter("cov-1").await;
+    let note = t.upload_note(&chapter_id, "a", &[small_jpeg()]).await.json();
+    let cover_uri = format!("/api/courses/{slug}/cover");
+    let put = |token: Option<&str>, form: Form| form.request_with(Method::PUT, &cover_uri, token);
+    let big = || Form::new().file("image", "cover.jpg", &jpeg(3000, 2000));
+
+    // Without a custom cover, the newest photo is used.
+    let c = &t.get("/api/courses").await.json()[0];
+    assert_eq!(c["custom_cover"], false);
+    assert_eq!(c["cover_thumb_url"], note["images"][0]["thumb_url"]);
+    assert_eq!(c["cover_url"], note["images"][0]["url"]);
+
+    // Admin only.
+    assert_eq!(t.call(put(None, big())).await.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(t.call(put(Some("wrong-token-wrong-token-wrong-token"), big())).await.status, StatusCode::FORBIDDEN);
+    assert_eq!(t.delete(&cover_uri, None).await.status, StatusCode::UNAUTHORIZED);
+
+    // Set: resized like note photos, and it wins over the automatic cover.
+    let r = t.call(put(Some(ADMIN), big())).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let set = r.json();
+    assert_eq!(set["custom_cover"], true);
+    assert_eq!(set["slug"], slug.as_str());
+    let main = set["cover_url"].as_str().unwrap().to_owned();
+    let thumb = set["cover_thumb_url"].as_str().unwrap().to_owned();
+    assert!(main.starts_with(&format!("{BASE_URL}/files/covers/")), "{main}");
+    let size = |url: &str| {
+        let img = image::load_from_memory(&std::fs::read(t.file_for_url(url)).unwrap()).unwrap();
+        (img.width(), img.height())
+    };
+    assert_eq!(size(&main), (1600, 1067));
+    assert_eq!(size(&thumb), (300, 200));
+    assert_eq!(t.get(main.strip_prefix(BASE_URL).unwrap()).await.status, StatusCode::OK);
+    let c = &t.get("/api/courses").await.json()[0];
+    assert_eq!(c["cover_thumb_url"], thumb.as_str());
+    let d = t.get(&format!("/api/courses/{slug}")).await.json();
+    assert_eq!((d["cover_url"].as_str(), d["custom_cover"].as_bool()), (Some(main.as_str()), Some(true)));
+    assert_eq!(d["chapters"][0]["id"], chapter_id.as_str());
+
+    // Newer notes don't replace a custom cover.
+    t.upload_note(&chapter_id, "b", &[small_jpeg()]).await;
+    assert_eq!(t.get("/api/courses").await.json()[0]["cover_thumb_url"], thumb.as_str());
+
+    // Replacing deletes the old files; the new one gets a new URL (cached forever).
+    let r = t.call(put(Some(ADMIN), Form::new().file("image", "b.jpg", &small_jpeg()))).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let new_main = r.json()["cover_url"].as_str().unwrap().to_owned();
+    assert_ne!(new_main, main);
+    assert!(t.file_for_url(&new_main).exists());
+    assert!(!t.file_for_url(&main).exists() && !t.file_for_url(&thumb).exists());
+
+    // Bad requests leave the cover alone.
+    let r = t.call(put(Some(ADMIN), Form::new().file("image", "x.txt", b"not an image"))).await;
+    assert_eq!(r.status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    let two = Form::new().file("image", "a.jpg", &small_jpeg()).file("image", "b.jpg", &small_jpeg());
+    assert_eq!(t.call(put(Some(ADMIN), two)).await.status, StatusCode::BAD_REQUEST);
+    assert_eq!(t.call(put(Some(ADMIN), Form::new())).await.status, StatusCode::BAD_REQUEST);
+    let missing = Form::new()
+        .file("image", "a.jpg", &small_jpeg())
+        .request_with(Method::PUT, "/api/courses/nope/cover", Some(ADMIN));
+    assert_eq!(t.call(missing).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(t.get("/api/courses").await.json()[0]["cover_url"], new_main.as_str());
+
+    // Remove: back to automatic, files gone.
+    assert_eq!(t.delete(&cover_uri, Some(ADMIN)).await.status, StatusCode::NO_CONTENT);
+    let c = &t.get("/api/courses").await.json()[0];
+    assert_eq!(c["custom_cover"], false);
+    assert!(c["cover_url"].as_str().unwrap().contains("/files/notes/"));
+    assert!(!t.file_for_url(&new_main).exists());
+    assert_eq!(t.delete(&cover_uri, Some(ADMIN)).await.status, StatusCode::NO_CONTENT, "removing twice is fine");
+
+    // Deleting the course removes its cover files.
+    assert_eq!(t.call(put(Some(ADMIN), big())).await.status, StatusCode::OK);
+    assert_eq!(count_files(&t.uploads().join("covers")), 2);
+    assert_eq!(t.delete(&format!("/api/courses/{slug}"), Some(ADMIN)).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(count_files(&t.uploads().join("covers")), 0);
+}

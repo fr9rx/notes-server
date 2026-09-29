@@ -17,5 +17,7 @@ fn main() {
     }
     // Release builds embed dist/; rebuild when it changes.
     println!("cargo:rerun-if-changed=frontend/dist");
+    // `sqlx::migrate!` embeds migrations/; rebuild when one is added.
+    println!("cargo:rerun-if-changed=migrations");
     println!("cargo:rerun-if-changed=build.rs");
 }

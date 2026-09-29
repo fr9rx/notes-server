@@ -81,10 +81,14 @@ fn draw_browser(frame: &mut Frame, area: Rect, app: &mut App) {
         .courses
         .iter()
         .map(|c| {
-            ListItem::new(Line::from(vec![
-                Span::raw(c.name.clone()),
-                Span::styled(format!("  {}", c.slug), Style::new().fg(Color::DarkGray)),
-            ]))
+            let mut line = Line::from(vec![
+                Span::raw(c.course.name.clone()),
+                Span::styled(format!("  {}", c.course.slug), Style::new().fg(Color::DarkGray)),
+            ]);
+            if c.custom_cover {
+                line.push_span(Span::styled("  ▣", Style::new().fg(ACCENT)));
+            }
+            ListItem::new(line)
         })
         .collect();
     draw_list(
@@ -301,7 +305,8 @@ fn hints(app: &App) -> Line<'static> {
                     ("a", "add"),
                     ("e", "edit"),
                     ("d", "delete"),
-                    ("r", "refresh"),
+                    ("c/C", "set/remove cover"),
+                    ("o", "open cover"),
                     ("?", "help"),
                     ("q", "quit"),
                 ],
@@ -396,7 +401,8 @@ fn draw_modal(frame: &mut Frame, area: Rect, modal: &mut Modal) {
                 ("Shift+↑/↓, K/J", "reorder chapters"),
                 ("m", "move the selected note to another chapter/course"),
                 ("i", "add images to the selected note"),
-                ("o / Enter on image", "open the image in your browser"),
+                ("c / C", "set / remove the selected course's cover photo (▣)"),
+                ("o / Enter on image", "open the image (or course cover) in your browser"),
                 ("r / F5", "reload everything from the server"),
                 ("q, Ctrl+C", "quit"),
                 ("", ""),

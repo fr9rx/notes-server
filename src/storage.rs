@@ -1,7 +1,8 @@
 //! Local-disk blob storage. Keys are always server-generated
-//! (`notes/{note_id}/{image_id}.jpg`), never taken from user input, so there
-//! is no path-traversal surface. All file access goes through this module so
-//! an object-store backend could replace it without touching the handlers.
+//! (`notes/{note_id}/{image_id}.jpg`, `covers/{course_id}/{cover_id}.jpg`),
+//! never taken from user input, so there is no path-traversal surface. All
+//! file access goes through this module so an object-store backend could
+//! replace it without touching the handlers.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -67,6 +68,14 @@ impl LocalStorage {
         }
     }
 
+    /// Best-effort removal of every cover photo a course ever had.
+    pub async fn delete_course_covers_logged(&self, course_id: &str) {
+        let dir = self.root.join(format!("covers/{course_id}"));
+        if let Err(e) = ignore_not_found(tokio::fs::remove_dir_all(dir).await) {
+            tracing::warn!(course_id, error = %e, "failed to delete course cover files");
+        }
+    }
+
     pub async fn delete_keys_logged(&self, keys: &[String]) {
         for key in keys {
             if let Err(e) = self.delete(key).await {
@@ -94,6 +103,15 @@ fn note_dir(note_id: &str) -> String {
 
 pub fn image_key(note_id: &str, image_id: &str) -> String {
     format!("{}/{image_id}.jpg", note_dir(note_id))
+}
+
+/// A fresh id per upload keeps the URL cacheable forever.
+pub fn cover_key(course_id: &str, cover_id: &str) -> String {
+    format!("covers/{course_id}/{cover_id}.jpg")
+}
+
+pub fn cover_thumb_key(course_id: &str, cover_id: &str) -> String {
+    format!("covers/{course_id}/{cover_id}_thumb.jpg")
 }
 
 pub fn thumb_key(note_id: &str, image_id: &str) -> String {

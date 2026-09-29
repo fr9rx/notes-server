@@ -266,11 +266,36 @@ fn manage_everything_from_the_tui() {
     h.typ("Calculus I");
     h.save();
     h.assert_ok();
-    assert_eq!(h.app.courses[0].name, "Calculus I");
+    assert_eq!(h.app.courses[0].course.name, "Calculus I");
     h.ch('r');
     h.assert_ok();
     assert_eq!(h.app.selected_chapter().unwrap().title, "Derivatives");
     assert_eq!(h.app.selected_note().unwrap().note.title, "Lecture 1 (final)");
+
+    // --- Course: set, then remove, the cover photo
+    assert!(!h.app.courses[0].custom_cover);
+    h.ch('C');
+    assert!(h.app.modal.is_none(), "nothing to remove yet");
+    h.ch('c');
+    h.typ(&h.files.display().to_string());
+    h.key(KeyCode::Enter);
+    assert!(matches!(&h.app.status, Some((StatusKind::Error, m)) if m.contains("one image")));
+    h.key_mod(KeyCode::Char('u'), KeyModifiers::CONTROL);
+    let cover = h.photo("a.jpg");
+    h.typ(&cover);
+    h.key(KeyCode::Enter);
+    h.assert_ok();
+    let c = &h.app.courses[0];
+    assert!(c.custom_cover, "{:?}", h.app.status);
+    assert!(c.cover_url.as_deref().is_some_and(|u| u.contains("/files/covers/")), "{:?}", c.cover_url);
+    assert!(h.screen().contains("▣"));
+    assert_eq!(h.app.selected_chapter().unwrap().title, "Derivatives", "selection survives");
+    h.ch('C');
+    assert!(matches!(h.app.modal, Some(Modal::Confirm { .. })));
+    h.ch('y');
+    h.assert_ok();
+    assert!(!h.app.courses[0].custom_cover);
+    assert!(!h.screen().contains("▣"));
 
     // --- Chapter: delete (with its note)
     h.key(KeyCode::Right);

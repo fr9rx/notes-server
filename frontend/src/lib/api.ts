@@ -51,17 +51,22 @@ async function errorMessage(res: Response): Promise<string> {
   return res.status === 429 ? "Too many uploads at once — wait a few seconds." : `Server returned ${res.status}`;
 }
 
+function localizeCover<T extends CourseSummary>(c: T): T {
+  return {
+    ...c,
+    cover_url: c.cover_url && localUrl(c.cover_url),
+    cover_thumb_url: c.cover_thumb_url && localUrl(c.cover_thumb_url),
+  };
+}
+
 export const api = {
   courses: async (signal?: AbortSignal) =>
-    (await getJson<CourseSummary[]>("/api/courses", signal)).map((c) => ({
-      ...c,
-      cover_thumb_url: c.cover_thumb_url && localUrl(c.cover_thumb_url),
-    })),
+    (await getJson<CourseSummary[]>("/api/courses", signal)).map(localizeCover),
 
   course: async (slug: string, signal?: AbortSignal) => {
     const c = await getJson<CourseDetail>(`/api/courses/${encodeURIComponent(slug)}`, signal);
     return {
-      ...c,
+      ...localizeCover(c),
       chapters: c.chapters.map((ch) => ({
         ...ch,
         cover_thumb_url: ch.cover_thumb_url && localUrl(ch.cover_thumb_url),

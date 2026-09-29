@@ -200,6 +200,21 @@ pub async fn delete_image(
 
 // ---- Upload plumbing -------------------------------------------------------
 
+/// Reads a multipart body holding exactly one image (field `image`) and
+/// resizes it. Used for course covers.
+pub(super) async fn process_single_image(state: &AppState, multipart: Multipart) -> AppResult<Processed> {
+    ensure_disk_space(state)?;
+    let form = read_form(multipart, false).await?;
+    if form.files.len() != 1 {
+        return Err(AppError::BadRequest("send exactly one image (form field `image`)".into()));
+    }
+    let (_, processed) = process_images(state, form.files)
+        .await?
+        .pop()
+        .expect("one image in, one out");
+    Ok(processed)
+}
+
 struct UploadedFile {
     filename: Option<String>,
     bytes: Vec<u8>,

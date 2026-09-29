@@ -13,6 +13,11 @@ pub struct Course {
     pub description: String,
     pub created_at: String,
     pub updated_at: String,
+    /// Admin-chosen cover photo (storage keys); exposed as URLs on [`CourseSummary`].
+    #[serde(skip)]
+    pub cover_key: Option<String>,
+    #[serde(skip)]
+    pub cover_thumb_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -106,7 +111,8 @@ impl NoteDto {
     }
 }
 
-/// Course listing row: the course plus counts and the newest image as a cover.
+/// Course listing row: the course plus counts and its newest image, the
+/// automatic cover used when the admin hasn't set one.
 #[derive(Debug, Clone, FromRow)]
 pub struct CourseSummaryRow {
     #[sqlx(flatten)]
@@ -114,7 +120,8 @@ pub struct CourseSummaryRow {
     pub chapter_count: i64,
     pub note_count: i64,
     pub image_count: i64,
-    pub cover_thumb_key: Option<String>,
+    pub auto_cover_key: Option<String>,
+    pub auto_cover_thumb_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,13 +131,26 @@ pub struct CourseSummary {
     pub chapter_count: i64,
     pub note_count: i64,
     pub image_count: i64,
+    /// The admin's cover photo if set, else the course's newest photo.
+    pub cover_url: Option<String>,
     pub cover_thumb_url: Option<String>,
+    /// Whether the cover was chosen by the admin (vs. picked automatically).
+    pub custom_cover: bool,
 }
 
 impl CourseSummary {
     pub fn new(row: CourseSummaryRow, storage: &LocalStorage) -> Self {
+        let c = &row.course;
+        let custom_cover = c.cover_key.is_some() && c.cover_thumb_key.is_some();
+        let (main, thumb) = if custom_cover {
+            (c.cover_key.clone(), c.cover_thumb_key.clone())
+        } else {
+            (row.auto_cover_key, row.auto_cover_thumb_key)
+        };
         Self {
-            cover_thumb_url: row.cover_thumb_key.map(|k| storage.url_for(&k)),
+            cover_url: main.map(|k| storage.url_for(&k)),
+            cover_thumb_url: thumb.map(|k| storage.url_for(&k)),
+            custom_cover,
             course: row.course,
             chapter_count: row.chapter_count,
             note_count: row.note_count,
@@ -188,7 +208,7 @@ pub struct Stats {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CourseDetail {
     #[serde(flatten)]
-    pub course: Course,
+    pub course: CourseSummary,
     pub chapters: Vec<ChapterSummary>,
 }
 

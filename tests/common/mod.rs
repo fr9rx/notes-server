@@ -174,10 +174,14 @@ impl Form {
         self
     }
 
-    pub fn request(mut self, uri: &str, token: Option<&str>) -> Request<Body> {
+    pub fn request(self, uri: &str, token: Option<&str>) -> Request<Body> {
+        self.request_with(Method::POST, uri, token)
+    }
+
+    pub fn request_with(mut self, method: Method, uri: &str, token: Option<&str>) -> Request<Body> {
         self.body
             .extend_from_slice(format!("--{}--\r\n", self.boundary).as_bytes());
-        let mut req = Request::post(uri).header(
+        let mut req = Request::builder().method(method).uri(uri).header(
             header::CONTENT_TYPE,
             format!("multipart/form-data; boundary={}", self.boundary),
         );
