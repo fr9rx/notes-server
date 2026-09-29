@@ -154,40 +154,6 @@ export function drawCheck(f: Frame): void {
   for (const [x, y] of pts) px(f, x, y, MAX);
 }
 
-// ---- Monograms (§6.5) ---------------------------------------------------------------
-
-/** Initials of the first 3 words, or the first 3 letters of a single word. */
-export function monogramText(name: string): string {
-  const words = name
-    .toUpperCase()
-    .split(/[^A-Z0-9]+/)
-    .filter(Boolean);
-  if (words.length === 0) return "?";
-  if (words.length === 1) return (words[0] ?? "").slice(0, 3);
-  return words
-    .slice(0, 3)
-    .map((w) => w[0])
-    .join("");
-}
-
-function hash(s: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
-
-export function drawMonogram(f: Frame, text: string, seed: string, level = 6): void {
-  const t = text.slice(0, 3);
-  const x = t.length === 3 ? 1 : t.length === 2 ? 3 : 5;
-  drawText(f, t, x, level);
-  // A deterministic sparkle in the unused top/bottom rows: every course has a fingerprint.
-  const h = hash(seed);
-  px(f, h % W, (h >> 8) % 2 === 0 ? 0 : H - 1, MAX);
-}
-
 // ---- 1D loader (§6.13) ---------------------------------------------------------------
 
 /** Levels for an n-dot row running the comet ping-pong (70 ms per step). */

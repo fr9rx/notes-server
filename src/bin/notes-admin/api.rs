@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use notes_server::models::{
-    Chapter, ChapterDetail, Course, CourseDetail, CourseSummary, CreateChapter, CreateCourse, ImageDto,
-    NoteDto, UpdateChapter, UpdateCourse, UpdateNote,
+    Chapter, ChapterDetail, Course, CourseDetail, CreateChapter, CreateCourse, ImageDto, NoteDto,
+    UpdateChapter, UpdateCourse, UpdateNote,
 };
 use reqwest::multipart::{Form, Part};
 use reqwest::{Method, RequestBuilder, StatusCode};
@@ -113,7 +113,7 @@ impl Api {
 
     // ---- Courses ----
 
-    pub async fn courses(&self) -> ApiResult<Vec<CourseSummary>> {
+    pub async fn courses(&self) -> ApiResult<Vec<Course>> {
         self.json(self.request(Method::GET, "/api/courses")).await
     }
 
@@ -132,23 +132,6 @@ impl Api {
 
     pub async fn delete_course(&self, slug: &str) -> ApiResult<()> {
         self.send(self.request(Method::DELETE, &format!("/api/courses/{slug}")))
-            .await
-            .map(drop)
-    }
-
-    /// Uploads `file` as the course's cover photo, replacing any previous one.
-    pub async fn set_course_cover(&self, slug: &str, file: &Path) -> ApiResult<CourseSummary> {
-        let form = add_files_as(Form::new(), "image", &[file.to_owned()]).await?;
-        self.json(
-            self.request(Method::PUT, &format!("/api/courses/{slug}/cover"))
-                .multipart(form),
-        )
-        .await
-    }
-
-    /// Goes back to the automatic cover (the course's newest photo).
-    pub async fn delete_course_cover(&self, slug: &str) -> ApiResult<()> {
-        self.send(self.request(Method::DELETE, &format!("/api/courses/{slug}/cover")))
             .await
             .map(drop)
     }
@@ -244,11 +227,7 @@ impl Api {
     }
 }
 
-async fn add_files(form: Form, files: &[PathBuf]) -> ApiResult<Form> {
-    add_files_as(form, "images", files).await
-}
-
-async fn add_files_as(mut form: Form, field: &'static str, files: &[PathBuf]) -> ApiResult<Form> {
+async fn add_files(mut form: Form, files: &[PathBuf]) -> ApiResult<Form> {
     for path in files {
         let bytes = tokio::fs::read(path)
             .await
@@ -257,7 +236,7 @@ async fn add_files_as(mut form: Form, field: &'static str, files: &[PathBuf]) ->
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "image".into());
-        form = form.part(field, Part::bytes(bytes).file_name(name));
+        form = form.part("images", Part::bytes(bytes).file_name(name));
     }
     Ok(form)
 }

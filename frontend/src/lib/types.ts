@@ -13,11 +13,6 @@ export interface CourseSummary extends Course {
   chapter_count: number;
   note_count: number;
   image_count: number;
-  /** The admin's cover photo if set, else the course's newest photo. */
-  cover_url: string | null;
-  cover_thumb_url: string | null;
-  /** Whether the admin chose the cover (vs. picked automatically). */
-  custom_cover: boolean;
 }
 
 export interface Chapter {
@@ -35,7 +30,7 @@ export interface ChapterSummary extends Chapter {
   cover_thumb_url: string | null;
 }
 
-export interface CourseDetail extends CourseSummary {
+export interface CourseDetail extends Course {
   chapters: ChapterSummary[];
 }
 

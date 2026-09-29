@@ -7,11 +7,9 @@ import { Page, PageItem, useDirection } from "../app/page";
 import { useToast } from "../app/toast";
 import { Button } from "../components/Button";
 import { Counter } from "../components/Counter";
-import { DotShimmer, Delayed, TextSkeleton } from "../components/Skeleton";
+import { Delayed, TextSkeleton } from "../components/Skeleton";
 import { StatePanel } from "../components/StatePanel";
 import { LEDField } from "../led/LEDField";
-import { LEDMatrix } from "../led/LEDMatrix";
-import { monogramText } from "../led/views";
 import { plural } from "../lib/format";
 import { useCourses, useTotals } from "../lib/queries";
 import type { CourseSummary } from "../lib/types";
@@ -41,8 +39,6 @@ function Hero() {
   const { scrollY } = useScroll();
   const copyY = useTransform(scrollY, [0, 360], [0, -48]);
   const copyOpacity = useTransform(scrollY, [0, 360], [1, 0]);
-  const stackY = useTransform(scrollY, [0, 480], [0, -80]);
-  const stackRotateX = useTransform(scrollY, [0, 480], [0, 12]);
   const fieldOpacity = useTransform(scrollY, [0, 600], [1, 0.25]);
   const [how, setHow] = useState(false);
 
@@ -147,72 +143,8 @@ function Hero() {
             </AnimatePresence>
           </m.div>
         </m.div>
-
-        <m.div
-          style={reduced ? undefined : { y: stackY, rotateX: stackRotateX, transformPerspective: 1000 }}
-          className="lg:col-span-5"
-        >
-          <PhotoStack />
-        </m.div>
       </div>
     </section>
-  );
-}
-
-/** The newest course covers, fanned like prints on a desk; they spread on hover. */
-function PhotoStack() {
-  const { data } = useCourses();
-  const reduced = useReducedMotion();
-  const [spread, setSpread] = useState(false);
-  const covers = (data ?? [])
-    .filter((c) => c.cover_thumb_url)
-    .slice(0, 3)
-    .map((c) => ({ slug: c.slug, name: c.name, src: c.cover_thumb_url as string }));
-  if (covers.length === 0) return null;
-
-  const layout = [
-    { rotate: -9, x: -70, y: 18, spreadX: -150, spreadRotate: -14 },
-    { rotate: 6, x: 64, y: -6, spreadX: 150, spreadRotate: 12 },
-    { rotate: -1.5, x: 0, y: 0, spreadX: 0, spreadRotate: -2 },
-  ].slice(3 - covers.length);
-
-  return (
-    <div
-      className="relative mx-auto hidden h-[340px] w-full max-w-[460px] sm:block"
-      onPointerEnter={() => setSpread(true)}
-      onPointerLeave={() => setSpread(false)}
-    >
-      {covers.map((c, i) => {
-        const l = layout[i] ?? layout[0]!;
-        return (
-          <m.div
-            key={c.slug}
-            className="absolute left-1/2 top-1/2 w-[62%] -translate-x-1/2 -translate-y-1/2"
-            initial={reduced ? { opacity: 0 } : { opacity: 0, y: 60, rotate: 0, scale: 0.9 }}
-            animate={{
-              opacity: 1,
-              x: spread && !reduced ? l.spreadX : l.x,
-              y: l.y,
-              rotate: spread && !reduced ? l.spreadRotate : l.rotate,
-              scale: 1,
-            }}
-            transition={{ ...spring.soft, delay: 0.35 + i * 0.12 }}
-            style={{ zIndex: i }}
-          >
-            <Link
-              to={`/c/${c.slug}`}
-              aria-label={c.name}
-              className="block overflow-hidden rounded-[18px] border border-line bg-surface-1 p-1.5 shadow-[var(--shadow-3)]"
-            >
-              <div className="aspect-[4/3] overflow-hidden rounded-[13px] bg-surface-3">
-                <img src={c.src} alt="" className="h-full w-full object-cover" draggable={false} />
-              </div>
-              <p className="t-caption truncate px-1.5 pb-1 pt-2 text-fg-3">{c.name}</p>
-            </Link>
-          </m.div>
-        );
-      })}
-    </div>
   );
 }
 
@@ -281,7 +213,7 @@ function CourseSection() {
           <Delayed>
             <div className="grid gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3">
               {Array.from({ length: cols === 1 ? 3 : 6 }, (_, i) => (
-                <CardSkeleton key={i} index={i} />
+                <CardSkeleton key={i} />
               ))}
             </div>
           </Delayed>
@@ -314,11 +246,10 @@ function CourseSection() {
   );
 }
 
-function CardSkeleton({ index }: { index: number }) {
+function CardSkeleton() {
   return (
-    <div className="rounded-[20px] border border-line-subtle bg-surface-1 p-1.5">
-      <DotShimmer className="aspect-video rounded-[14px]" index={index} />
-      <TextSkeleton className="px-2.5 pb-3 pt-4" widths={["70%", "45%"]} />
+    <div className="min-h-[172px] rounded-[20px] border border-line-subtle bg-surface-1 p-1.5">
+      <TextSkeleton className="px-3.5 pb-4 pt-4" widths={["70%", "90%", "45%"]} />
     </div>
   );
 }
@@ -331,8 +262,6 @@ function CourseCard({ course, delay }: { course: CourseSummary; delay: number })
   const ry = useMotionValue(0);
   const rotateX = useSpring(rx, spring.tilt);
   const rotateY = useSpring(ry, spring.tilt);
-  const [scan, setScan] = useState(0);
-  const [hover, setHover] = useState(false);
 
   const onMove = (e: ReactPointerEvent) => {
     const el = ref.current;
@@ -350,7 +279,6 @@ function CourseCard({ course, delay }: { course: CourseSummary; delay: number })
   const reset = () => {
     rx.set(0);
     ry.set(0);
-    setHover(false);
   };
 
   return (
@@ -375,52 +303,13 @@ function CourseCard({ course, delay }: { course: CourseSummary; delay: number })
           ref={ref}
           to={`/c/${course.slug}`}
           onPointerMove={onMove}
-          onPointerEnter={() => {
-            setScan((s) => s + 1);
-            setHover(true);
-          }}
           onPointerLeave={reset}
-          onFocus={() => setHover(true)}
-          onBlur={() => setHover(false)}
-          className="spotlight block rounded-[20px] p-1.5 focus-visible:outline-offset-4"
+          className="spotlight flex min-h-[172px] flex-col rounded-[20px] p-1.5 focus-visible:outline-offset-4"
         >
-          <div className="relative z-[1] aspect-video overflow-hidden rounded-[14px] bg-plate">
-            {course.cover_thumb_url ? (
-              <>
-                <div className="halftone">
-                  <img src={course.cover_thumb_url} alt="" className="h-full w-full object-cover" loading="lazy" />
-                </div>
-                <m.img
-                  src={course.cover_thumb_url}
-                  alt=""
-                  loading="lazy"
-                  className="absolute inset-0 h-full w-full object-cover"
-                  animate={{ opacity: hover ? 1 : 0, scale: hover ? 1.04 : 1 }}
-                  transition={{ duration: dur.slow, ease: ease.outExpo }}
-                />
-              </>
-            ) : (
-              <div className="grid h-full place-items-center">
-                <LEDMatrix size="md" plate={false} pattern="monogram" monogram={monogramText(course.name)} seed={course.slug} scan={scan} />
-              </div>
-            )}
-          </div>
-          <div className="relative z-[3] -mt-5 ml-2.5 inline-block">
-            <m.div layoutId={`course:${course.slug}:monogram`} transition={spring.morph}>
-              <LEDMatrix
-                size="xs"
-                plate
-                pattern="monogram"
-                monogram={monogramText(course.name)}
-                seed={course.slug}
-                scan={scan}
-              />
-            </m.div>
-          </div>
-          <div className="relative z-[1] px-2.5 pb-2.5 pt-3">
+          <div className="relative z-[1] flex flex-1 flex-col px-3.5 pb-3.5 pt-4">
             <h3 className="t-title-m text-fg-1">{course.name}</h3>
             {course.description && <p className="t-body-s mt-1 line-clamp-2 text-fg-2">{course.description}</p>}
-            <div className="mt-4 flex items-center justify-between">
+            <div className="mt-auto flex items-center justify-between pt-6">
               <span className="t-caption text-fg-3">
                 {plural(course.chapter_count, "ch", "ch")} · {plural(course.note_count, "note")} ·{" "}
                 {plural(course.image_count, "photo")}

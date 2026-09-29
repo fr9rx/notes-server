@@ -342,25 +342,6 @@
   }
 }
 
-/* LED halftone covers (§6.2): the photo reads as LED dots until revealed. */
-.halftone {
-  position: absolute;
-  inset: 0;
-  background: var(--led-2);
-  mask-image: radial-gradient(circle, #000 1.6px, transparent 2.1px);
-  mask-size: 6px 6px;
-}
-.halftone > img {
-  mix-blend-mode: screen;
-  filter: grayscale(1) contrast(1.15) brightness(0.9);
-}
-:root:not([data-theme="dark"]) .halftone {
-  background: #dfe6f5;
-}
-:root:not([data-theme="dark"]) .halftone > img {
-  mix-blend-mode: multiply;
-}
-
 /* Spotlight + spotlight border following the pointer (--mx/--my set from JS). */
 .spotlight {
   position: relative;

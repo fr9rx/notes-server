@@ -10,7 +10,7 @@ use std::time::Duration;
 use axum::Router;
 use axum::extract::{ConnectInfo, DefaultBodyLimit};
 use axum::http::{HeaderValue, Method, Request, Response, StatusCode, header};
-use axum::routing::{delete, get, post, put};
+use axum::routing::{delete, get, post};
 use tower::ServiceBuilder;
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::key_extractor::KeyExtractor;
@@ -25,9 +25,6 @@ use crate::auth::RequireAdmin;
 use crate::error::{AppError, AppResult};
 
 pub use notes::{MAX_IMAGE_BYTES, MAX_IMAGES_PER_REQUEST};
-
-/// Cap for a course cover upload: one image plus multipart overhead.
-const MAX_COVER_REQUEST_BYTES: usize = MAX_IMAGE_BYTES + 1024 * 1024;
 
 /// Cap for a whole multipart upload request (10 images × 10 MB + form fields, with headroom).
 pub const MAX_UPLOAD_REQUEST_BYTES: usize = 60 * 1024 * 1024;
@@ -72,12 +69,6 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/courses/{slug}",
             get(courses::get).patch(courses::update).delete(courses::delete),
-        )
-        .route(
-            "/api/courses/{slug}/cover",
-            put(courses::set_cover)
-                .delete(courses::delete_cover)
-                .layer(DefaultBodyLimit::max(MAX_COVER_REQUEST_BYTES)),
         )
         .route("/api/courses/{slug}/chapters", post(chapters::create))
         .route(
@@ -175,7 +166,7 @@ async fn auth_check(_: RequireAdmin) -> StatusCode {
 
 fn cors(origin: Option<&str>) -> CorsLayer {
     let layer = CorsLayer::new()
-        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::PATCH, Method::DELETE])
+        .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
         .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
         .max_age(Duration::from_secs(3600));
     match origin {

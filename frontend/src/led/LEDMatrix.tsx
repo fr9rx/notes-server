@@ -11,7 +11,6 @@ import {
   W,
   drawArrow,
   drawCheck,
-  drawMonogram,
   drawStarting,
   drawStopped,
   drawText,
@@ -32,7 +31,6 @@ export type LEDPattern =
   | "arrowLoop"
   | "check"
   | "404"
-  | "monogram"
   | "stopped"
   | "warning";
 
@@ -53,17 +51,12 @@ export interface LEDMatrixProps {
   text?: string;
   loopText?: boolean;
   onTextDone?: () => void;
-  monogram?: string;
-  /** Seed for the monogram's sparkle dot (the course slug). */
-  seed?: string;
   size?: LEDSize;
   /** Override dot/pitch (CSS px). */
   dot?: number;
   pitch?: number;
   plate?: boolean;
   glow?: boolean;
-  /** Changing this number plays a top-to-bottom scanline (card hover). */
-  scan?: number;
   label?: string;
   screws?: boolean;
   silk?: string;
@@ -75,14 +68,11 @@ export function LEDMatrix({
   text,
   loopText,
   onTextDone,
-  monogram,
-  seed = "",
   size = "sm",
   dot: dotOverride,
   pitch: pitchOverride,
   plate,
   glow: glowProp,
-  scan,
   label,
   screws,
   silk,
@@ -100,18 +90,13 @@ export function LEDMatrix({
   const height = H * pitch;
 
   // Everything the render loop reads lives in a ref, so props changes don't restart it.
-  const props = useRef({ pattern, text, loopText, onTextDone, monogram, seed, reduced });
-  props.current = { pattern, text, loopText, onTextDone, monogram, seed, reduced };
+  const props = useRef({ pattern, text, loopText, onTextDone, reduced });
+  props.current = { pattern, text, loopText, onTextDone, reduced };
 
   const textStart = useRef(0);
   useEffect(() => {
     textStart.current = performance.now();
   }, [text]);
-
-  const scanStart = useRef(-Infinity);
-  useEffect(() => {
-    if (scan) scanStart.current = performance.now();
-  }, [scan]);
 
   const aria = label;
 
@@ -192,10 +177,6 @@ export function LEDMatrix({
           if (!p.reduced && t % 6000 > 5880) drawX(f);
           else drawText(f, "404", 1);
           break;
-        case "monogram":
-          drawMonogram(f, p.monogram ?? "", p.seed);
-          still = true;
-          break;
         case "stopped":
           drawStopped(f);
           still = true;
@@ -205,16 +186,6 @@ export function LEDMatrix({
           break;
       }
 
-      // Hover scanline: rows light to max top -> bottom, 40 ms per row.
-      const s = now - scanStart.current;
-      if (s >= 0 && s < 40 * (H + 2)) {
-        const row = Math.floor(s / 40);
-        for (let x = 0; x < W; x++) {
-          const i = row * W + x;
-          if (row < H && (f[i] ?? 0) > 0) f[i] = MAX;
-        }
-        still = false;
-      }
       return { frame: f, still };
     };
 
@@ -269,7 +240,7 @@ export function LEDMatrix({
     io.observe(canvas);
     document.addEventListener("visibilitychange", kick);
     kick();
-    // Props like `pattern`/`text`/`scan` change through the ref; poll for a restart cheaply.
+    // Props like `pattern`/`text` change through the ref; poll for a restart cheaply.
     const wake = window.setInterval(kick, 250);
 
     return () => {

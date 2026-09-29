@@ -1,5 +1,5 @@
 use axum::Json;
-use axum::extract::{Multipart, Path, State};
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use uuid::Uuid;
 
@@ -8,7 +8,6 @@ use crate::auth::RequireAdmin;
 use crate::db;
 use crate::error::{AppError, AppResult, is_unique_violation};
 use crate::models::{ChapterSummary, Course, CourseDetail, CourseSummary, CreateCourse, UpdateCourse};
-use crate::storage::{cover_key, cover_thumb_key};
 
 pub async fn list(State(state): State<AppState>) -> AppResult<Json<Vec<CourseSummary>>> {
     let rows = db::list_courses(&state.db).await?;
@@ -23,8 +22,10 @@ pub async fn get(
     State(state): State<AppState>,
     Path(slug): Path<String>,
 ) -> AppResult<Json<CourseDetail>> {
-    let course = summary(&state, &slug).await?;
-    let chapters = db::chapters_for_course(&state.db, &course.course.id)
+    let course = db::course_by_slug(&state.db, &slug)
+        .await?
+        .ok_or(AppError::NotFound("course"))?;
+    let chapters = db::chapters_for_course(&state.db, &course.id)
         .await?
         .into_iter()
         .map(|r| ChapterSummary::new(r, &state.storage))
@@ -90,70 +91,8 @@ pub async fn delete(
     // Rows first, then files: the worst case is an orphaned file, never a
     // row pointing at nothing.
     state.storage.delete_notes_logged(&note_ids).await;
-    state.storage.delete_course_covers_logged(&course.id).await;
     tracing::info!(course = %slug, notes = note_ids.len(), "deleted course");
     Ok(StatusCode::NO_CONTENT)
-}
-
-/// Sets the course's cover photo from a multipart upload with one `image`,
-/// replacing any previous cover. It is resized like note photos.
-pub async fn set_cover(
-    _: RequireAdmin,
-    State(state): State<AppState>,
-    Path(slug): Path<String>,
-    multipart: Multipart,
-) -> AppResult<Json<CourseSummary>> {
-    let course = db::course_by_slug(&state.db, &slug)
-        .await?
-        .ok_or(AppError::NotFound("course"))?;
-    let p = super::notes::process_single_image(&state, multipart).await?;
-
-    let cover_id = Uuid::now_v7().to_string();
-    let key = cover_key(&course.id, &cover_id);
-    let thumb = cover_thumb_key(&course.id, &cover_id);
-    let mut written = Vec::with_capacity(2);
-    for (k, bytes) in [(&key, &p.main.bytes), (&thumb, &p.thumb.bytes)] {
-        if let Err(e) = state.storage.put(k, bytes).await {
-            state.storage.delete_keys_logged(&written).await;
-            return Err(e.into());
-        }
-        written.push(k.clone());
-    }
-
-    match db::replace_course_cover(&state.db, &course.id, Some((&key, &thumb))).await {
-        Ok(Some(old)) => state.storage.delete_keys_logged(&old).await,
-        result => {
-            state.storage.delete_keys_logged(&written).await;
-            result?; // a DB error; otherwise the course was deleted meanwhile
-            return Err(AppError::NotFound("course"));
-        }
-    }
-    tracing::info!(course = %slug, width = p.main.width, height = p.main.height, "set course cover");
-    Ok(Json(summary(&state, &slug).await?))
-}
-
-/// Removes the admin's cover photo; the course goes back to showing its
-/// newest photo.
-pub async fn delete_cover(
-    _: RequireAdmin,
-    State(state): State<AppState>,
-    Path(slug): Path<String>,
-) -> AppResult<StatusCode> {
-    let course = db::course_by_slug(&state.db, &slug)
-        .await?
-        .ok_or(AppError::NotFound("course"))?;
-    let old = db::replace_course_cover(&state.db, &course.id, None)
-        .await?
-        .ok_or(AppError::NotFound("course"))?;
-    state.storage.delete_keys_logged(&old).await;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-async fn summary(state: &AppState, slug: &str) -> AppResult<CourseSummary> {
-    let row = db::course_summary_by_slug(&state.db, slug)
-        .await?
-        .ok_or(AppError::NotFound("course"))?;
-    Ok(CourseSummary::new(row, &state.storage))
 }
 
 fn slug_taken(slug: &str) -> AppError {

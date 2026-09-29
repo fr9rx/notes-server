@@ -10,7 +10,6 @@ import {
   drawText,
   drawX,
   loaderLevels,
-  monogramText,
   newFrame,
   textScrollDone,
 } from "./views";
@@ -75,14 +74,6 @@ describe("firmware parity (mcu/notes-matrix/src/view.c)", () => {
 });
 
 describe("web helpers", () => {
-  it("monogram initials", () => {
-    expect(monogramText("Linear Algebra")).toBe("LA");
-    expect(monogramText("Math 101")).toBe("M1");
-    expect(monogramText("physics")).toBe("PHY");
-    expect(monogramText("Intro to Data Science")).toBe("ITD");
-    expect(monogramText("  ")).toBe("?");
-  });
-
   it("loader comet stays in range", () => {
     for (let t = 0; t < 3000; t += 70) {
       const l = loaderLevels(13, t);

@@ -6,16 +6,14 @@ import { Link, useParams } from "react-router";
 
 import { Page, useDirection, usePageItemVariants } from "../app/page";
 import { ButtonLink } from "../components/Button";
-import { DotShimmer, Delayed, TextSkeleton } from "../components/Skeleton";
+import { Delayed, TextSkeleton } from "../components/Skeleton";
 import { StatePanel } from "../components/StatePanel";
 import { LED_COLORS } from "../led/sprites";
-import { LEDMatrix } from "../led/LEDMatrix";
-import { monogramText } from "../led/views";
 import { ApiError } from "../lib/api";
 import { pad2, plural } from "../lib/format";
 import { useCourse } from "../lib/queries";
 import type { ChapterSummary } from "../lib/types";
-import { ease, spring } from "../motion/springs";
+import { spring } from "../motion/springs";
 
 export default function CoursePage() {
   const { slug = "" } = useParams();
@@ -65,39 +63,7 @@ export default function CoursePage() {
             maskImage: "linear-gradient(110deg, #000, transparent 70%)",
           }}
         />
-        {data?.custom_cover && data.cover_url && (
-          // The admin's cover photo, bleeding in from the right behind the title.
-          <m.img
-            src={data.cover_url}
-            alt=""
-            aria-hidden
-            draggable={false}
-            initial={reduced ? { opacity: 0 } : { opacity: 0, scale: 1.06 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 1.1, ease: ease.outExpo }}
-            className="pointer-events-none absolute inset-y-0 right-0 h-full w-full object-cover opacity-40 sm:w-[64%] sm:opacity-100"
-            style={{
-              maskImage: "linear-gradient(to left, #000 30%, transparent 96%)",
-              WebkitMaskImage: "linear-gradient(to left, #000 30%, transparent 96%)",
-            }}
-          />
-        )}
-        <div className="relative flex flex-col gap-6 sm:flex-row sm:items-center sm:gap-10">
-          <m.div layoutId={`course:${slug}:monogram`} transition={spring.morph} className="shrink-0 self-start">
-            {data ? (
-              <LEDMatrix
-                size="lg"
-                dot={9}
-                pitch={14}
-                pattern="monogram"
-                monogram={monogramText(data.name)}
-                seed={slug}
-                scan={1}
-              />
-            ) : (
-              <DotShimmer className="h-[152px] w-[222px] rounded-[28px]" />
-            )}
-          </m.div>
+        <div className="relative">
           <div className="min-w-0">
             {data ? (
               <m.div

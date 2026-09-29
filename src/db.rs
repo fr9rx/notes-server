@@ -38,43 +38,21 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::migrate::MigrateErro
 
 // ---- Courses ---------------------------------------------------------------
 
-/// Courses with counts and their newest image (`CourseSummaryRow`), followed
-/// by a `WHERE`/`ORDER BY` tail.
-macro_rules! course_summary_sql {
-    ($tail:literal) => {
-        concat!(
-            "SELECT c.*,
-                (SELECT COUNT(*) FROM chapters ch WHERE ch.course_id = c.id) AS chapter_count,
-                (SELECT COUNT(*) FROM notes n JOIN chapters ch ON ch.id = n.chapter_id
-                  WHERE ch.course_id = c.id) AS note_count,
-                (SELECT COUNT(*) FROM images i JOIN notes n ON n.id = i.note_id
-                  JOIN chapters ch ON ch.id = n.chapter_id WHERE ch.course_id = c.id) AS image_count,
-                ai.storage_key AS auto_cover_key,
-                ai.thumb_key AS auto_cover_thumb_key
-             FROM courses c
-             LEFT JOIN images ai ON ai.id = (
-                SELECT i.id FROM images i JOIN notes n ON n.id = i.note_id
-                  JOIN chapters ch ON ch.id = n.chapter_id WHERE ch.course_id = c.id
-                  ORDER BY n.created_at DESC, n.id DESC, i.position LIMIT 1) ",
-            $tail
-        )
-    };
-}
-
 pub async fn list_courses(e: impl SqliteExecutor<'_>) -> sqlx::Result<Vec<CourseSummaryRow>> {
-    sqlx::query_as(course_summary_sql!("ORDER BY c.name COLLATE NOCASE, c.id"))
-        .fetch_all(e)
-        .await
-}
-
-pub async fn course_summary_by_slug(
-    e: impl SqliteExecutor<'_>,
-    slug: &str,
-) -> sqlx::Result<Option<CourseSummaryRow>> {
-    sqlx::query_as(course_summary_sql!("WHERE c.slug = ?1"))
-        .bind(slug)
-        .fetch_optional(e)
-        .await
+    sqlx::query_as(
+        "SELECT c.*,
+            (SELECT COUNT(*) FROM chapters ch WHERE ch.course_id = c.id) AS chapter_count,
+            (SELECT COUNT(*) FROM notes n JOIN chapters ch ON ch.id = n.chapter_id
+              WHERE ch.course_id = c.id) AS note_count,
+            (SELECT COUNT(*) FROM images i JOIN notes n ON n.id = i.note_id
+              JOIN chapters ch ON ch.id = n.chapter_id WHERE ch.course_id = c.id) AS image_count,
+            (SELECT i.thumb_key FROM images i JOIN notes n ON n.id = i.note_id
+              JOIN chapters ch ON ch.id = n.chapter_id WHERE ch.course_id = c.id
+              ORDER BY n.created_at DESC, n.id DESC, i.position LIMIT 1) AS cover_thumb_key
+         FROM courses c ORDER BY c.name COLLATE NOCASE, c.id",
+    )
+    .fetch_all(e)
+    .await
 }
 
 pub async fn course_by_slug(e: impl SqliteExecutor<'_>, slug: &str) -> sqlx::Result<Option<Course>> {
@@ -121,34 +99,6 @@ pub async fn update_course(
     .bind(slug)
     .fetch_optional(e)
     .await
-}
-
-/// Sets (or with `None`, clears) the course's cover photo keys. Returns the
-/// previous keys, for deleting the old files, or `None` if the course is gone.
-pub async fn replace_course_cover(
-    pool: &SqlitePool,
-    course_id: &str,
-    cover: Option<(&str, &str)>,
-) -> sqlx::Result<Option<Vec<String>>> {
-    let mut tx = pool.begin().await?;
-    let old: Option<(Option<String>, Option<String>)> =
-        sqlx::query_as("SELECT cover_key, cover_thumb_key FROM courses WHERE id = ?1")
-            .bind(course_id)
-            .fetch_optional(&mut *tx)
-            .await?;
-    let Some((key, thumb)) = old else { return Ok(None) };
-    sqlx::query(
-        "UPDATE courses SET cover_key = ?1, cover_thumb_key = ?2,
-            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-         WHERE id = ?3",
-    )
-    .bind(cover.map(|c| c.0))
-    .bind(cover.map(|c| c.1))
-    .bind(course_id)
-    .execute(&mut *tx)
-    .await?;
-    tx.commit().await?;
-    Ok(Some(key.into_iter().chain(thumb).collect()))
 }
 
 pub async fn course_note_ids(e: impl SqliteExecutor<'_>, course_id: &str) -> sqlx::Result<Vec<String>> {
