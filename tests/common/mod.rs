@@ -59,9 +59,11 @@ impl TestApp {
 
     pub async fn call(&self, mut req: Request<Body>) -> Resp {
         // What `into_make_service_with_connect_info` provides in production;
-        // the per-IP rate limiter needs it.
-        req.extensions_mut()
-            .insert(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 40000))));
+        // the per-IP rate limiter needs it. Tests may set their own peer.
+        if req.extensions().get::<ConnectInfo<SocketAddr>>().is_none() {
+            req.extensions_mut()
+                .insert(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 40000))));
+        }
         let res = self.app.clone().oneshot(req).await.unwrap();
         let status = res.status();
         let headers = res.headers().clone();

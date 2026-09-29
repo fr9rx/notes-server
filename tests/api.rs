@@ -557,3 +557,37 @@ async fn course_cover_photo() {
     assert_eq!(t.delete(&format!("/api/courses/{slug}"), Some(ADMIN)).await.status, StatusCode::NO_CONTENT);
     assert_eq!(count_files(&t.uploads().join("covers")), 0);
 }
+
+#[tokio::test]
+async fn rate_limit_sees_real_clients_through_the_tunnel() {
+    use axum::extract::ConnectInfo;
+    use std::net::SocketAddr;
+
+    let t = TestApp::with(|s| {
+        s.upload_burst = 1;
+        s.upload_refill_secs = 3600;
+    })
+    .await;
+    let (_, chapter_id) = t.course_with_chapter("cf-1").await;
+    let upload = |peer: [u8; 4], cf_ip: Option<&str>| {
+        let mut req = Form::new()
+            .text("title", "x")
+            .file("images", "a.jpg", &small_jpeg())
+            .request(&format!("/api/chapters/{chapter_id}/notes"), None);
+        req.extensions_mut().insert(ConnectInfo(SocketAddr::from((peer, 5000))));
+        if let Some(ip) = cf_ip {
+            req.headers_mut().insert("cf-connecting-ip", ip.parse().unwrap());
+        }
+        req
+    };
+
+    // Through cloudflared (loopback), each visitor gets their own limit.
+    assert_eq!(t.call(upload([127, 0, 0, 1], Some("203.0.113.7"))).await.status, StatusCode::CREATED);
+    assert_eq!(t.call(upload([127, 0, 0, 1], Some("203.0.113.8"))).await.status, StatusCode::CREATED);
+    assert_eq!(t.call(upload([127, 0, 0, 1], Some("203.0.113.7"))).await.status, StatusCode::TOO_MANY_REQUESTS);
+
+    // A client on the LAN can't dodge its limit by sending the header itself.
+    assert_eq!(t.call(upload([192, 168, 1, 50], None)).await.status, StatusCode::CREATED);
+    let r = t.call(upload([192, 168, 1, 50], Some("198.51.100.1"))).await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+}

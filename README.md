@@ -187,7 +187,9 @@ cargo run --release --bin notes-admin                          # asks for the UR
 $env:NOTES_URL = "https://notes.example.com"
 $env:NOTES_ADMIN_TOKEN = "<ADMIN_TOKEN from /etc/notes-server/env>"
 cargo run --release --bin notes-admin
-# the UNO Q with its self-signed certificate (see "Useful commands" below for getting cert.pem):
+# the UNO Q through its Cloudflare Tunnel (a trusted certificate, works from anywhere):
+cargo run --release --bin notes-admin -- --url https://notes.fr9rx.org
+# or on the LAN with its self-signed certificate (see "Useful commands" below for getting cert.pem):
 cargo run --release --bin notes-admin -- --url https://<hostname>.local --ca-cert .\unoq-cert.pem
 ```
 
@@ -298,6 +300,34 @@ Useful commands:
 ```
 
 Nothing else needs undoing, because the router was never touched. The server keeps running; the matrix just stops showing its status until `notes-matrix` is flashed again.
+
+### Public HTTPS with a Cloudflare Tunnel (notes.fr9rx.org)
+
+The board is live at **https://notes.fr9rx.org**. `cloudflared` runs on the board as the `cloudflared` systemd service and keeps an outbound connection to Cloudflare. Cloudflare serves the site with a publicly trusted certificate, which it renews itself, and passes requests down the tunnel to the server on `127.0.0.1:443`. No ports are opened on the router, and changes to the board's Wi-Fi IP don't matter.
+
+How it was set up (on the board, over `adb shell -t`):
+
+```bash
+# cloudflared from Cloudflare's apt repository (updates come with apt upgrade)
+sudo mkdir -p --mode=0755 /usr/share/keyrings
+curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main' | sudo tee /etc/apt/sources.list.d/cloudflared.list
+sudo apt-get update && sudo apt-get install cloudflared
+
+cloudflared tunnel login                              # open the printed link, pick fr9rx.org
+cloudflared tunnel create notes                       # writes ~/.cloudflared/<TUNNEL_ID>.json
+cloudflared tunnel route dns notes notes.fr9rx.org    # CNAME notes -> the tunnel
+sudo install -m 600 ~/.cloudflared/<TUNNEL_ID>.json /etc/cloudflared/
+sudo cp deploy/cloudflared-config.yml /etc/cloudflared/config.yml   # fill in <TUNNEL_ID>
+sudo cloudflared service install                      # enabled and started at boot
+```
+
+`PUBLIC_BASE_URL=https://notes.fr9rx.org` is set in `/etc/notes-server/env`. The per-IP upload limit uses Cloudflare's `CF-Connecting-IP` header for connections from loopback, meaning the tunnel, so each visitor still gets their own limit. The LAN address (`https://<hostname>.local`, self-signed) keeps working.
+
+| Task | Command |
+|---|---|
+| Tunnel status and logs | `adb shell systemctl status cloudflared` / `adb shell journalctl -u cloudflared -f` |
+| Tunnel connections | `adb shell cloudflared tunnel info notes` |
 
 ### Certificates
 

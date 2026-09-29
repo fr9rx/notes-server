@@ -1,0 +1,12 @@
+# Cloudflare Tunnel for notes-server; installed as /etc/cloudflared/config.yml.
+# Cloudflare holds the public certificate for the hostname; the hop from
+# cloudflared to the server stays on loopback, so the self-signed origin
+# certificate isn't checked. Replace <TUNNEL_ID> (from `cloudflared tunnel create`).
+tunnel: <TUNNEL_ID>
+credentials-file: /etc/cloudflared/<TUNNEL_ID>.json
+ingress:
+  - hostname: notes.fr9rx.org
+    service: https://127.0.0.1:443
+    originRequest:
+      noTLSVerify: true
+  - service: http_status:404

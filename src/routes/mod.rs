@@ -3,17 +3,18 @@ mod courses;
 mod notes;
 mod stats;
 
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use axum::extract::DefaultBodyLimit;
-use axum::http::{HeaderValue, Method, Response, StatusCode, header};
+use axum::extract::{ConnectInfo, DefaultBodyLimit};
+use axum::http::{HeaderValue, Method, Request, Response, StatusCode, header};
 use axum::routing::{delete, get, post, put};
 use tower::ServiceBuilder;
-use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
-use tower_governor::key_extractor::PeerIpKeyExtractor;
+use tower_governor::key_extractor::KeyExtractor;
+use tower_governor::{GovernorError, GovernorLayer};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::services::ServeDir;
 use tower_http::set_header::SetResponseHeaderLayer;
@@ -42,7 +43,7 @@ pub fn router(state: AppState) -> Router {
         GovernorConfigBuilder::default()
             .per_second(settings.upload_refill_secs)
             .burst_size(settings.upload_burst)
-            .key_extractor(PeerIpKeyExtractor)
+            .key_extractor(ClientIp)
             .finish()
             .expect("rate limit settings are non-zero"),
     );
@@ -135,6 +136,35 @@ pub fn router(state: AppState) -> Router {
             HeaderValue::from_static("max-age=31536000"),
         ))
         .with_state(state)
+}
+
+/// Rate-limit key: the client's IP. Connections from loopback come through
+/// the local Cloudflare Tunnel (`cloudflared`), whose `CF-Connecting-IP`
+/// header carries the real visitor. The header is ignored from anyone else,
+/// so clients connecting directly can't forge it to dodge their limit.
+#[derive(Debug, Clone, Copy)]
+struct ClientIp;
+
+impl KeyExtractor for ClientIp {
+    type Key = IpAddr;
+
+    fn extract<T>(&self, req: &Request<T>) -> Result<IpAddr, GovernorError> {
+        let peer = req
+            .extensions()
+            .get::<ConnectInfo<SocketAddr>>()
+            .map(|c| c.ip().to_canonical())
+            .ok_or(GovernorError::UnableToExtractKey)?;
+        if peer.is_loopback()
+            && let Some(ip) = req
+                .headers()
+                .get("cf-connecting-ip")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.trim().parse().ok())
+        {
+            return Ok(ip);
+        }
+        Ok(peer)
+    }
 }
 
 /// 204 if the bearer token is the admin token (401/403 otherwise). Lets
