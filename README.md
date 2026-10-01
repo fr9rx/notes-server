@@ -1,6 +1,6 @@
 # notes-server
 
-A backend for a course-notes website, organised as **Course → Chapter → Note → images**. It runs on an **Arduino UNO Q (4 GB)**, and the board's **LED matrix shows the server's status**.
+A backend for a course-notes website, organised as **Course → Chapter → Note → images**. It runs on **Windows**, which currently hosts https://notes.fr9rx.org (see "Host on Windows"), or on an **Arduino UNO Q (4 GB)**, where the board's **LED matrix shows the server's status**.
 
 - **Normal users** don't need an account. They can browse everything and upload notes (a title, optional text and 1–10 images).
 - **The admin** manages courses and chapters, and is the only one who can edit or delete anything.
@@ -248,6 +248,41 @@ cargo run --release           # https://localhost:3443 ; data in .\data, images 
 
 On Windows, `MATRIX_ROUTER` can point at a plain file, for example `$env:MATRIX_ROUTER = "matrix.bin"`. The server then appends the MessagePack-RPC stream to that file instead of a socket, which is handy for inspecting it.
 
+## Host on Windows
+
+This PC serves **https://notes.fr9rx.org** with two Windows services. Both start at boot, before anyone signs in, and restart after a crash.
+
+| Service | Runs as | What it does |
+|---|---|---|
+| `notes-server` | `NT SERVICE\notes-server`, a virtual account that can write only its data, upload and log folders | The server on `https://127.0.0.1:8443`, loopback only |
+| `Cloudflared` | LocalSystem | The `notes` Cloudflare Tunnel: `notes.fr9rx.org` → `127.0.0.1:8443`. Cloudflare serves the public certificate. |
+
+From an elevated PowerShell in the repository:
+
+```powershell
+.\deploy\install-windows.ps1 -PublicUrl https://notes.fr9rx.org     # first install, and every update
+.\deploy\tunnel-windows.ps1 -TunnelId <id> -CredentialsFile <id>.json  # once; see the script for creating a tunnel
+```
+
+`install-windows.ps1` does the following:
+1. Builds the website and `target\release\notes-server.exe`, and copies it to `C:\Program Files\notes-server`.
+2. The first time, it creates `C:\ProgramData\notes-server` with:
+   - `notes-server.env`, which holds the settings and a random `ADMIN_TOKEN`;
+   - `certs\`, `data\notes.db`, `uploads\` and `logs\`.
+3. Registers and starts the service, then checks `/health`.
+
+Running it again replaces the binary and keeps the data. Only SYSTEM, Administrators and the service can read the env file. The service gets its settings from `--env-file`, because Windows services have no per-service environment. The LED matrix stays off because `MATRIX_ROUTER` isn't set.
+
+| Task | Command |
+|---|---|
+| Status / restart | `Get-Service notes-server, Cloudflared` / `Restart-Service notes-server` (elevated) |
+| Logs | `Get-Content C:\ProgramData\notes-server\logs\notes-server.<date>.log -Wait` (one file per day, 14 kept); tunnel: `C:\ProgramData\cloudflared\cloudflared.log` |
+| Admin token | `Select-String ADMIN_TOKEN C:\ProgramData\notes-server\notes-server.env` (elevated) |
+| Change settings | Edit `notes-server.env`, then `Restart-Service notes-server` |
+| Run in the foreground instead | Stop the service, then `notes-server.exe --env-file <file>`; Ctrl+C stops it |
+| Backup | Stop the service, copy `C:\ProgramData\notes-server\data` and `uploads`, start it again |
+| Uninstall | `Stop-Service notes-server, Cloudflared; sc.exe delete notes-server; sc.exe delete Cloudflared` |
+
 ## Deploy to the Arduino UNO Q
 
 Plug the board into the laptop over USB-C.
@@ -299,7 +334,7 @@ Nothing else needs undoing, because the router was never touched. The server kee
 
 ### Public HTTPS with a Cloudflare Tunnel (notes.fr9rx.org)
 
-The board is live at **https://notes.fr9rx.org**. `cloudflared` runs on the board as the `cloudflared` systemd service and keeps an outbound connection to Cloudflare. Cloudflare serves the site with a publicly trusted certificate, which it renews itself, and passes requests down the tunnel to the server on `127.0.0.1:443`. No ports are opened on the router, and changes to the board's Wi-Fi IP don't matter.
+This was how the board served **https://notes.fr9rx.org**, before the site moved to Windows (see "Host on Windows"). The same `notes` tunnel now runs on the PC. `cloudflared` ran on the board as the `cloudflared` systemd service and keeps an outbound connection to Cloudflare. Cloudflare serves the site with a publicly trusted certificate, which it renews itself, and passes requests down the tunnel to the server on `127.0.0.1:443`. No ports are opened on the router, and changes to the board's Wi-Fi IP don't matter.
 
 How it was set up (on the board, over `adb shell -t`):
 
@@ -357,7 +392,7 @@ rsync -a /var/lib/notes-server/uploads/ /backup/uploads/
 
 ## Configuration
 
-All settings are environment variables. On the board they live in `/etc/notes-server/env`; see `deploy/notes-server.env.example`.
+All settings are environment variables, or `KEY=VALUE` lines in the file given with `--env-file`. Real environment variables win over the file. On Windows the file is `C:\ProgramData\notes-server\notes-server.env`. On the board the variables live in `/etc/notes-server/env`; see `deploy/notes-server.env.example`.
 
 | Variable | Default | |
 |---|---|---|
@@ -375,6 +410,7 @@ All settings are environment variables. On the board they live in `/etc/notes-se
 | `MIN_FREE_DISK_MB` | `1024` | Uploads are refused (and the matrix warns) below this |
 | `UPLOAD_BURST` / `UPLOAD_REFILL_SECS` | `5` / `12` | Per-IP limit on public uploads |
 | `RUST_LOG` | `notes_server=info,tower_http=info` | Use `notes_server=debug` to log how long each image took |
+| `LOG_DIR` | unset (stdout) | Write daily log files here instead, keeping 14. The Windows service uses `C:\ProgramData\notes-server\logs` |
 
 ## Layout
 
