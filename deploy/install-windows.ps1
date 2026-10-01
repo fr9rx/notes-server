@@ -166,5 +166,6 @@ if (-not $ok) {
         Sort-Object LastWriteTime | Select-Object -Last 1 | ForEach-Object { Get-Content $_.FullName -Tail 20 }
     exit 1
 }
-Write-Host "Running: https://127.0.0.1:$port (public: $PublicUrl)" -ForegroundColor Green
+$public = (Select-String '^PUBLIC_BASE_URL=' $envFile).Line -replace '^PUBLIC_BASE_URL=', ''
+Write-Host "Running: https://127.0.0.1:$port (public: $public)" -ForegroundColor Green
 Write-Host "Admin token: Select-String ADMIN_TOKEN '$envFile'   Logs: $home_\logs"
